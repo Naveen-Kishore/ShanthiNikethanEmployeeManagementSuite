@@ -1,0 +1,23 @@
+@inject ModuleRegistry ModuleRegistry
+@inject NavigationManager Nav
+
+<aside class="sidebar @(IsOpen ? "open" : "")">
+    <button class="icon-btn sidebar-toggle" @onclick="OnToggle" title="@(IsOpen ? "Collapse navigation" : "Expand navigation")">
+        <Icon Name="menu" />
+    </button>
+    <nav class="sidebar-nav">
+        @foreach (var module in ModuleRegistry.EnabledModules)
+        {
+            var active = Nav.Uri.Contains(module.BasePath, StringComparison.OrdinalIgnoreCase);
+            <a class="nav-item @(active ? "active" : "")" href="@module.BasePath" title="@module.DisplayName">
+                <Icon Name="@module.Icon" />
+                <span class="nav-label">@module.DisplayName</span>
+            </a>
+        }
+    </nav>
+</aside>
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnToggle { get; set; }
+}

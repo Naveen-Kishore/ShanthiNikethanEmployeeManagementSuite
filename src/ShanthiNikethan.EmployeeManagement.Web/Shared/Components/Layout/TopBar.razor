@@ -1,0 +1,36 @@
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+
+<header class="topbar">
+    <div class="topbar-left">
+        <a href="/staff" class="topbar-brand">
+            <img src="/img/logo-emblem-black.png" alt="" class="topbar-logo topbar-logo-light" oncontextmenu="return false;" />
+            <img src="/img/logo-emblem-white.png" alt="" class="topbar-logo topbar-logo-dark" oncontextmenu="return false;" />
+            <div class="topbar-brand-text">
+                <div class="topbar-brand-name">Shanthi Nikethan</div>
+                <div class="topbar-brand-sub">Employee Management Suite</div>
+            </div>
+        </a>
+    </div>
+    <div class="topbar-actions">
+        <ThemeToggle />
+        <div class="user-block">
+            <div class="user-avatar">@GetInitials()</div>
+            <div class="user-meta">
+                <div class="user-name">@CurrentUser.DisplayName</div>
+                <a class="user-signout" href="MicrosoftIdentity/Account/SignOut">Sign out</a>
+            </div>
+        </div>
+    </div>
+</header>
+
+@code {
+    private string GetInitials()
+    {
+        var name = CurrentUser.DisplayName ?? "";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        if (parts.Length == 1) return parts[0][..Math.Min(2, parts[0].Length)].ToUpper();
+        return $"{parts[0][0]}{parts[^1][0]}".ToUpper();
+    }
+}

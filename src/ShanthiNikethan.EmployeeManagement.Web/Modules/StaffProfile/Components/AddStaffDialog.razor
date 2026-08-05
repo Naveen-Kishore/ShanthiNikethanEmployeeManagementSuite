@@ -1,0 +1,175 @@
+@inject IStaffProfileService StaffService
+
+@if (Visible)
+{
+    <div class="modal-backdrop" @onclick="Cancel">
+        <div class="modal wide" @onclick:stopPropagation="true">
+            <h2>Add staff member</h2>
+
+            <div class="form-grid">
+                <div class="form-row">
+                    <label>Full name *</label>
+                    <input type="text" @bind="_name" @bind:event="oninput" placeholder="e.g. MALARKODI A" autocomplete="off" />
+                </div>
+                <div class="form-row">
+                    <label>Designation *</label>
+                    <select @bind="_designation" @bind:after="OnDesignationChanged">
+                        <option value="Teaching">Teaching</option>
+                        <option value="NonTeaching">Non-Teaching</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Sub-designation (optional)</label>
+                <SubDesignationPicker Category="Enum.Parse<StaffDesignation>(_designation)" @bind-Value="_subDesignation" />
+            </div>
+
+            <div class="form-row">
+                <label>Staff code (optional)</label>
+                <input type="text" value="@_staffCode" @oninput="OnStaffCodeInput" maxlength="20"
+                       placeholder="Leave blank to auto-generate (e.g. SNM-T-048)" style="font-family: ui-monospace, monospace;" />
+                <div class="stat-sub" style="margin-top:4px;">
+                    Letters, numbers, and - _ / . only — use this to match your own staff ID format instead of the default.
+                </div>
+            </div>
+
+            <div class="form-grid">
+                <div class="form-row">
+                    <label>Date of joining *</label>
+                    <input type="date" @bind="_dateOfJoining" />
+                </div>
+                <div class="form-row">
+                    <label>Phone number</label>
+                    <input type="tel" @bind="_phone" @bind:event="oninput" placeholder="10-digit mobile" autocomplete="off" />
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Bank account number *</label>
+                <input type="text" @bind="_accountNumber" @bind:event="oninput" placeholder="Type account number" autocomplete="off" />
+            </div>
+            <div class="form-row">
+                <label>Re-type bank account number *</label>
+                <input type="text" @bind="_accountNumberConfirm" @bind:event="oninput" placeholder="Must match exactly" autocomplete="off" />
+                @if (!string.IsNullOrEmpty(_accountNumberConfirm) && _accountNumber != _accountNumberConfirm)
+                {
+                    <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">Account numbers do not match.</div>
+                }
+            </div>
+
+            <div class="form-grid">
+                <div class="form-row">
+                    <label>Payment mode</label>
+                    <select @bind="_bankMode">
+                        <option value="IobBulkUpload">IOB bulk upload</option>
+                        <option value="ManualNeft">Manual NEFT/RTGS</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>Gross pay (₹)</label>
+                    <input type="number" @bind="_grossPay" min="0" step="1" placeholder="Leave 0 if unknown yet" />
+                </div>
+            </div>
+
+            <div class="stat-sub">EPF and ESIC enrollment are set later from the staff profile's Statutory tab, once you have their UAN / ESIC number.</div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert danger">@_error</div>
+            }
+
+            <div class="modal-actions">
+                <button type="button" class="secondary" @onclick="Cancel">Cancel</button>
+                <button type="button" class="primary" @onclick="SaveAsync" disabled="@(!CanSave || _saving)">
+                    @(_saving ? "Saving…" : "Add staff")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public EventCallback<Staff> OnCreated { get; set; }
+
+    private string _name = "";
+    private string _designation = "Teaching";
+    private string? _subDesignation;
+    private string _staffCode = "";
+    private DateOnly _dateOfJoining = DateOnly.FromDateTime(DateTime.Today);
+    private string _phone = "";
+    private string _accountNumber = "";
+    private string _accountNumberConfirm = "";
+    private string _bankMode = "IobBulkUpload";
+    private decimal _grossPay = 0;
+    private string? _error;
+    private bool _saving;
+
+    private bool CanSave =>
+        !string.IsNullOrWhiteSpace(_name) &&
+        !string.IsNullOrWhiteSpace(_accountNumber) &&
+        _accountNumber == _accountNumberConfirm;
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (!CanSave) return;
+        _saving = true;
+        try
+        {
+            var staff = new Staff
+            {
+                Id = Guid.NewGuid(),
+                FirstName = _name.Trim(),
+                DisplayName = _name.Trim().ToUpperInvariant(),
+                Designation = Enum.Parse<StaffDesignation>(_designation),
+                SubDesignation = _subDesignation,
+                StaffCode = _staffCode,
+                DateOfJoining = _dateOfJoining,
+                PhoneNumber = string.IsNullOrWhiteSpace(_phone) ? null : _phone.Trim(),
+                BankAccountNumber = _accountNumber.Trim(),
+                BankMode = Enum.Parse<BankPaymentMode>(_bankMode),
+                GrossPay = _grossPay
+            };
+
+            var created = await StaffService.CreateAsync(staff);
+            await OnCreated.InvokeAsync(created);
+            ResetForm();
+            await VisibleChanged.InvokeAsync(false);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Cancel()
+    {
+        ResetForm();
+        await VisibleChanged.InvokeAsync(false);
+    }
+
+    private void OnDesignationChanged() => _subDesignation = null;
+
+    private void OnStaffCodeInput(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString() ?? "";
+        var sanitized = System.Text.RegularExpressions.Regex.Replace(raw, @"[^A-Za-z0-9\-_/.]", "");
+        _staffCode = sanitized.Length > 20 ? sanitized[..20] : sanitized;
+    }
+
+    private void ResetForm()
+    {
+        _name = ""; _phone = ""; _accountNumber = ""; _accountNumberConfirm = "";
+        _designation = "Teaching"; _subDesignation = null; _bankMode = "IobBulkUpload"; _grossPay = 0;
+        _staffCode = "";
+        _dateOfJoining = DateOnly.FromDateTime(DateTime.Today);
+        _error = null;
+    }
+}

@@ -1,0 +1,19 @@
+Copyright (c) 2026 Shanthi Nikethan Matric Higher Secondary School, Arumbavur.
+All rights reserved.
+
+This software and associated documentation files (the "Software") are the
+proprietary property of Shanthi Nikethan Matric Higher Secondary School,
+Arumbavur. Unauthorized copying, modification, distribution, public display,
+or commercial use of this Software, in whole or in part, is strictly
+prohibited without express written permission from the copyright holder.
+
+Third-party components used by this Software (including but not limited to
+ASP.NET Core, Entity Framework Core, ClosedXML, QuestPDF, Lucide Icons) are
+governed by their own licences. See the respective NOTICE files or NuGet
+package metadata for details.
+
+If you wish to license this Software for use in another institution, please
+contact the copyright holder.
+
+--- HISTORY ---
+Initial version: 2026

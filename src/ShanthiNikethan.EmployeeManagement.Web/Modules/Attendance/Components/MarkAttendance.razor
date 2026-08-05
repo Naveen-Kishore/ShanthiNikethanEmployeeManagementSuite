@@ -1,0 +1,361 @@
+@page "/attendance"
+@inject IAttendanceService AttendanceService
+@inject IStaffProfileService StaffService
+
+<h1>Attendance</h1>
+
+<div class="filter-tabs" style="margin-bottom: 18px; width: fit-content;">
+    <button class="filter-tab @(_viewMode == "mark" ? "active" : "")" @onclick='() => SwitchView("mark")'>Mark Attendance</button>
+    <button class="filter-tab @(_viewMode == "register" ? "active" : "")" @onclick='() => SwitchView("register")'>Monthly Register</button>
+</div>
+
+@if (_viewMode == "mark")
+{
+    <div class="toolbar">
+        <input type="date" value="@_selectedDate.ToString("yyyy-MM-dd")" @onchange="OnDatePicked" style="width: auto;" max="@Today.ToString("yyyy-MM-dd")" />
+        <button class="secondary" @onclick="() => ShiftDate(-1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /> Previous day</button>
+        <button class="secondary" @onclick="ResetToToday">Today</button>
+        <button class="secondary" @onclick="() => ShiftDate(1)" disabled="@(_selectedDate >= Today)">Next day <Icon Name="chevron-down" Size="14" Style="transform: rotate(-90deg);" /></button>
+        @if (!_loading && (_selectedDate >= Today || _adminOverride) && _records.Count(r => r.Id == Guid.Empty) > 0)
+        {
+            <button class="primary" @onclick="MarkAllRemainingPresent">
+                Mark remaining @_records.Count(r => r.Id == Guid.Empty) as Present
+            </button>
+        }
+    </div>
+
+    @if (_selectedDate.DayOfWeek == DayOfWeek.Sunday)
+    {
+        <div class="alert warning" style="margin-bottom: 16px;">@_selectedDate.ToString("dddd, dd MMMM yyyy") is a Sunday — not counted as a working day, but you can still mark it if needed.</div>
+    }
+
+    @if (_selectedDate < Today && !_adminOverride)
+    {
+        <div class="alert warning" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <span>@_selectedDate.ToString("dddd, dd MMMM yyyy") is locked — only today's attendance can be marked or changed directly. Past days can only be edited by an admin.</span>
+            <button class="secondary" @onclick="EnableAdminOverride">I'm the admin — unlock this day</button>
+        </div>
+    }
+    else if (_adminOverride && _selectedDate < Today)
+    {
+        <div class="alert danger" style="margin-bottom: 16px;">
+            Admin override active for @_selectedDate.ToString("dd MMM yyyy") — changes made now are logged separately from the day's original entries.
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else
+    {
+        var locked = _selectedDate < Today && !_adminOverride;
+        var totals = AttendanceService.ComputeDailyTotals(_records);
+        <div class="calc-panel" style="margin-bottom: 16px;">
+            <div style="display: grid; grid-template-columns: 90px repeat(4, 1fr); gap: 8px; font-size: 12.5px;">
+                <div></div>
+                <div class="stat-sub" style="font-weight: 600;">Present</div>
+                <div class="stat-sub" style="font-weight: 600;">Absent</div>
+                <div class="stat-sub" style="font-weight: 600;">Casual Leave</div>
+                <div class="stat-sub" style="font-weight: 600;">Leave</div>
+                <div class="stat-sub" style="font-weight: 600;">Morning</div>
+                <div>@totals.PresentM</div><div>@totals.AbsentM</div><div>@totals.CasualLeaveM</div><div>@totals.LeaveM</div>
+                <div class="stat-sub" style="font-weight: 600;">Evening</div>
+                <div>@totals.PresentE</div><div>@totals.AbsentE</div><div>@totals.CasualLeaveE</div><div>@totals.LeaveE</div>
+            </div>
+            <div class="stat-sub" style="margin-top: 8px;">@_records.Count(r => r.Id == Guid.Empty) not yet marked</div>
+        </div>
+
+        <div class="table-scroll">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th class="sortable" @onclick='() => SetSort("name")'>Staff @SortArrow("name")</th>
+                    <th class="sortable" @onclick='() => SetSort("designation")'>Designation @SortArrow("designation")</th>
+                    <th style="width: 150px">Morning</th>
+                    <th style="width: 150px">Evening</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in SortedRecords)
+                {
+                    <tr style="@(r.Id == Guid.Empty ? "background: var(--warning-soft);" : "")">
+                        <td>@r.StaffDisplayName</td>
+                        <td>@r.Designation</td>
+                        <td>
+                            <select value="@r.MorningStatus" disabled="@locked" @onchange="e => OnSessionChanged(r, true, e)">
+                                <option value="Present">Present</option>
+                                <option value="Absent">Absent</option>
+                                <option value="CasualLeave">Casual Leave</option>
+                                <option value="Leave">Leave</option>
+                            </select>
+                        </td>
+                        <td>
+                            <select value="@r.EveningStatus" disabled="@locked" @onchange="e => OnSessionChanged(r, false, e)">
+                                <option value="Present">Present</option>
+                                <option value="Absent">Absent</option>
+                                <option value="CasualLeave">Casual Leave</option>
+                                <option value="Leave">Leave</option>
+                            </select>
+                        </td>
+                        <td>
+                            <input type="text" placeholder="Optional note" value="@r.Notes" disabled="@locked"
+                                   @onchange="e => OnNotesChanged(r, e)" style="font-size: 12.5px;" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+}
+else
+{
+    <div class="toolbar">
+        <button class="secondary" @onclick="() => ShiftRegisterMonth(-1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /></button>
+        <MonthYearPicker Value="@_registerMonth" ValueChanged="OnRegisterMonthChanged" />
+        <button class="secondary" @onclick="() => ShiftRegisterMonth(1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(-90deg);" /></button>
+    </div>
+
+    @if (_registerLoading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else
+    {
+        var monthParsed = DateOnly.TryParse(_registerMonth + "-01", out var mp) ? mp : DateOnly.FromDateTime(DateTime.Today);
+        var daysInMonth = DateTime.DaysInMonth(monthParsed.Year, monthParsed.Month);
+        <div class="table-scroll attendance-register-scroll">
+        <table class="grid attendance-register" style="font-size: 10.5px;">
+            <thead>
+                <tr>
+                    <th style="position: sticky; left: 0; top: 0; z-index: 3; min-width: 140px; text-align: left;">Staff</th>
+                    <th style="position: sticky; top: 0; z-index: 2; width: 22px; padding: 4px 2px;"></th>
+                    @for (int d = 1; d <= daysInMonth; d++)
+                    {
+                        var day = new DateOnly(monthParsed.Year, monthParsed.Month, d);
+                        <th style="position: sticky; top: 0; z-index: 2; text-align: center; padding: 3px 2px; width: 34px;">
+                            <div class="stat-sub" style="font-size: 9px; font-weight: 400; text-transform: none; letter-spacing: 0;">@day.ToString("ddd")</div>
+                            <div style="font-size: 13px; font-weight: 400; color: var(--text-primary);">@d</div>
+                        </th>
+                    }
+                    <th style="position: sticky; top: 0; z-index: 2; width: 46px;">Work</th>
+                    <th style="position: sticky; top: 0; z-index: 2; width: 42px;">Pres</th>
+                    <th style="position: sticky; top: 0; z-index: 2; width: 32px;">CL</th>
+                    <th style="position: sticky; top: 0; z-index: 2; width: 38px;">Leave</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var s in _registerStaff)
+                {
+                    var total = _monthlyTotals.FirstOrDefault(t => t.StaffId == s.Id);
+                    <tr>
+                        <td rowspan="2" style="position: sticky; left: 0; z-index: 1; background: var(--bg-surface); white-space: nowrap; vertical-align: middle;">@s.DisplayName</td>
+                        <td class="stat-sub" style="text-align: center;">M</td>
+                        @for (int d = 1; d <= daysInMonth; d++)
+                        {
+                            var day = new DateOnly(monthParsed.Year, monthParsed.Month, d);
+                            var isSunday = day.DayOfWeek == DayOfWeek.Sunday;
+                            var rec = _registerRecords.FirstOrDefault(r => r.StaffId == s.Id && r.AttendanceDate == day);
+                            <td style="text-align: center; padding: 3px; @RegisterBackground(rec?.MorningStatus, isSunday)" title="@(rec == null ? "Not marked" : rec.MorningStatus.ToString())">
+                                @if (!(isSunday && rec == null))
+                                {
+                                    <span style="color: @RegisterColor(rec?.MorningStatus); font-weight: 400; font-size: 12px;">@RegisterLetter(rec?.MorningStatus)</span>
+                                }
+                            </td>
+                        }
+                        <td rowspan="2" style="text-align: center; vertical-align: middle;">@(total?.WorkingDays ?? 0)</td>
+                        <td rowspan="2" style="text-align: center; vertical-align: middle;">@(total?.DaysPresent.ToString("0.#") ?? "0")</td>
+                        <td rowspan="2" style="text-align: center; vertical-align: middle;">@(total?.CasualLeaveDays.ToString("0.#") ?? "0")</td>
+                        <td rowspan="2" style="text-align: center; vertical-align: middle;">@(total?.LeaveDays.ToString("0.#") ?? "0")</td>
+                    </tr>
+                    <tr>
+                        <td class="stat-sub" style="text-align: center;">E</td>
+                        @for (int d = 1; d <= daysInMonth; d++)
+                        {
+                            var day = new DateOnly(monthParsed.Year, monthParsed.Month, d);
+                            var isSunday = day.DayOfWeek == DayOfWeek.Sunday;
+                            var rec = _registerRecords.FirstOrDefault(r => r.StaffId == s.Id && r.AttendanceDate == day);
+                            <td style="text-align: center; padding: 3px; border-bottom: 2px solid var(--border); @RegisterBackground(rec?.EveningStatus, isSunday)" title="@(rec == null ? "Not marked" : rec.EveningStatus.ToString())">
+                                @if (!(isSunday && rec == null))
+                                {
+                                    <span style="color: @RegisterColor(rec?.EveningStatus); font-weight: 400; font-size: 12px;">@RegisterLetter(rec?.EveningStatus)</span>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+        <div class="stat-sub" style="margin-top: 10px;">P = Present · A = Absent · C = Casual Leave · L = Leave · — = Not marked · Shaded columns are Sundays</div>
+    }
+}
+
+@code {
+    private string _viewMode = "mark";
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    // ---- Mark Attendance ----
+    private DateOnly _selectedDate = Today;
+    private bool _adminOverride;
+    private List<AttendanceRecord> _records = new();
+    private bool _loading = true;
+    private List<Staff> _allStaff = new();
+    private string _sortColumn = "name";
+    private bool _sortDescending = false;
+
+    private List<AttendanceRecord> SortedRecords
+    {
+        get
+        {
+            IEnumerable<AttendanceRecord> q = _records;
+            q = _sortColumn switch
+            {
+                "designation" => _sortDescending
+                    ? q.OrderByDescending(r => r.Designation).ThenBy(r => r.StaffDisplayName)
+                    : q.OrderBy(r => r.Designation).ThenBy(r => r.StaffDisplayName),
+                _ => _sortDescending ? q.OrderByDescending(r => r.StaffDisplayName) : q.OrderBy(r => r.StaffDisplayName)
+            };
+            return q.ToList();
+        }
+    }
+
+    private void SetSort(string column)
+    {
+        if (_sortColumn == column) _sortDescending = !_sortDescending;
+        else { _sortColumn = column; _sortDescending = false; }
+    }
+
+    private string SortArrow(string column) => _sortColumn != column ? "" : (_sortDescending ? "▼" : "▲");
+
+    // ---- Monthly Register ----
+    private string _registerMonth = DateTime.Today.ToString("yyyy-MM");
+    private List<Staff> _registerStaff = new();
+    private List<AttendanceRecord> _registerRecords = new();
+    private List<StaffMonthlyTotal> _monthlyTotals = new();
+    private bool _registerLoading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allStaff = await StaffService.ListActiveAsync();
+        await ReloadMarkAsync();
+    }
+
+    private async Task SwitchView(string mode)
+    {
+        _viewMode = mode;
+        if (mode == "register")
+            await ReloadRegisterAsync();
+    }
+
+    private async Task ReloadMarkAsync()
+    {
+        _loading = true;
+        _records = await AttendanceService.GetForDateAsync(_selectedDate);
+        _loading = false;
+    }
+
+    private async Task OnDatePicked(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var picked) && picked <= Today)
+        {
+            _selectedDate = picked;
+            _adminOverride = false;
+            await ReloadMarkAsync();
+        }
+    }
+
+    private async Task ShiftDate(int days)
+    {
+        var target = _selectedDate.AddDays(days);
+        if (target > Today) return;
+        _selectedDate = target;
+        _adminOverride = false;
+        await ReloadMarkAsync();
+    }
+
+    private async Task ResetToToday()
+    {
+        _selectedDate = Today;
+        _adminOverride = false;
+        await ReloadMarkAsync();
+    }
+
+    private void EnableAdminOverride() => _adminOverride = true;
+
+    private async Task MarkAllRemainingPresent()
+    {
+        var isOverride = _selectedDate < Today && _adminOverride;
+        await AttendanceService.MarkAllUnmarkedPresentAsync(_selectedDate, isOverride);
+        await ReloadMarkAsync();
+    }
+
+    private async Task OnSessionChanged(AttendanceRecord r, bool isMorning, ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<AttendanceStatus>(e.Value?.ToString(), out var newStatus)) return;
+        var morning = isMorning ? newStatus : r.MorningStatus;
+        var evening = isMorning ? r.EveningStatus : newStatus;
+        var isOverride = _selectedDate < Today && _adminOverride;
+        await AttendanceService.MarkAsync(r.StaffId, _selectedDate, morning, evening, r.Notes, isOverride);
+        await ReloadMarkAsync();
+    }
+
+    private async Task OnNotesChanged(AttendanceRecord r, ChangeEventArgs e)
+    {
+        var notes = e.Value?.ToString();
+        var morning = r.Id == Guid.Empty ? AttendanceStatus.Present : r.MorningStatus;
+        var evening = r.Id == Guid.Empty ? AttendanceStatus.Present : r.EveningStatus;
+        var isOverride = _selectedDate < Today && _adminOverride;
+        await AttendanceService.MarkAsync(r.StaffId, _selectedDate, morning, evening, notes, isOverride);
+        await ReloadMarkAsync();
+    }
+
+    // ---- Monthly Register ----
+    private async Task OnRegisterMonthChanged(string v)
+    {
+        _registerMonth = v;
+        await ReloadRegisterAsync();
+    }
+
+    private async Task ShiftRegisterMonth(int delta)
+    {
+        var parsed = DateOnly.TryParse(_registerMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+        _registerMonth = parsed.AddMonths(delta).ToString("yyyy-MM");
+        await ReloadRegisterAsync();
+    }
+
+    private async Task ReloadRegisterAsync()
+    {
+        _registerLoading = true;
+        _registerStaff = _allStaff.OrderBy(s => s.DisplayName).ToList();
+        var parsed = DateOnly.TryParse(_registerMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+        var monthEnd = parsed.AddMonths(1).AddDays(-1);
+        _registerRecords = await AttendanceService.ListInRangeAsync(parsed, monthEnd);
+        _monthlyTotals = await AttendanceService.GetMonthlyTotalsAsync(parsed.Year, parsed.Month);
+        _registerLoading = false;
+    }
+
+    private static string RegisterLetter(AttendanceStatus? status) => status switch
+    {
+        AttendanceStatus.Present => "P",
+        AttendanceStatus.Absent => "A",
+        AttendanceStatus.CasualLeave => "C",
+        AttendanceStatus.Leave => "L",
+        _ => "—"
+    };
+
+    private static string RegisterColor(AttendanceStatus? status) => status switch
+    {
+        AttendanceStatus.Present => "var(--success)",
+        AttendanceStatus.Absent or AttendanceStatus.CasualLeave or AttendanceStatus.Leave => "var(--danger)",
+        _ => "var(--text-muted)"
+    };
+
+    private static string RegisterBackground(AttendanceStatus? status, bool isSunday) => status switch
+    {
+        AttendanceStatus.Absent or AttendanceStatus.CasualLeave or AttendanceStatus.Leave => "background: var(--danger-soft);",
+        _ => isSunday ? "background: var(--bg-surface-alt);" : ""
+    };
+}

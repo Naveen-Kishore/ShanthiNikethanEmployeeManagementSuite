@@ -1,0 +1,65 @@
+@* Confirms a soft-delete (single or bulk). Explains the 60-day reactivation
+   window so there's never a surprise "gone forever" moment. *@
+
+@if (Visible)
+{
+    <div class="modal-backdrop" @onclick="Cancel">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Remove @(Staff.Count == 1 ? Staff[0].DisplayName : $"{Staff.Count} staff members")</h2>
+
+            @if (Staff.Count > 1)
+            {
+                <ul style="margin: 0 0 14px; padding-left: 18px; color: var(--text-secondary); font-size: 13px;">
+                    @foreach (var s in Staff)
+                    {
+                        <li>@s.DisplayName — @s.StaffCode</li>
+                    }
+                </ul>
+            }
+
+            <div class="alert warning">
+                This moves @(Staff.Count == 1 ? "this record" : "these records") to <strong>Soft-deleted</strong>.
+                They disappear from the active directory immediately, but all data —
+                salary, banking, statutory IDs, photo — stays intact for
+                <strong>60 days</strong>. You can reactivate anytime within that window
+                from the Soft-deleted tab. After 60 days, the record is permanently
+                purged and would need to be re-created from scratch.
+            </div>
+
+            <div class="form-row">
+                <label>Reason (optional, for your own records)</label>
+                <input type="text" @bind="_reason" @bind:event="oninput"
+                       placeholder="e.g. Relieved, transferred, resigned" />
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary" @onclick="Cancel">Cancel</button>
+                <button type="button" class="danger" @onclick="Confirm">
+                    Remove @(Staff.Count > 1 ? $"({Staff.Count})" : "")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public List<Staff> Staff { get; set; } = new();
+    [Parameter] public EventCallback<string?> OnConfirm { get; set; }
+
+    private string _reason = "";
+
+    private async Task Confirm()
+    {
+        await OnConfirm.InvokeAsync(string.IsNullOrWhiteSpace(_reason) ? null : _reason.Trim());
+        _reason = "";
+        await VisibleChanged.InvokeAsync(false);
+    }
+
+    private async Task Cancel()
+    {
+        _reason = "";
+        await VisibleChanged.InvokeAsync(false);
+    }
+}

@@ -1,0 +1,438 @@
+@inject IStaffProfileService StaffService
+@inject IPhotoStorageService PhotoService
+@inject StatutorySalaryCalculator Calculator
+@inject IJSRuntime JS
+
+@if (Visible && Working != null)
+{
+    <div class="drawer-backdrop" @onclick="Close"></div>
+    <div class="drawer">
+        <div class="drawer-header">
+            <div class="drawer-identity">
+                <div class="drawer-avatar">
+                    @if (!string.IsNullOrEmpty(Working.PhotoRelativePath))
+                    {
+                        <img src="@($"/{Working.PhotoRelativePath}")" alt="" />
+                    }
+                    else
+                    {
+                        @Initials(Working.DisplayName)
+                    }
+                </div>
+                <div>
+                    <div class="drawer-name">@Working.DisplayName</div>
+                    <div class="drawer-sub">
+                        @Working.StaffCode · @Working.Designation@(string.IsNullOrEmpty(Working.SubDesignation) ? "" : $" · {Working.SubDesignation}")
+                        <span class="badge @(Working.IsActive ? "active" : "inactive")" style="margin-left: 6px;">
+                            @(Working.IsActive ? "Active" : "Inactive")
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="drawer-actions">
+                @if (!_editMode)
+                {
+                    <button class="icon-btn" title="Edit" @onclick="EnterEditMode"><Icon Name="pencil" /></button>
+                }
+                <button class="icon-btn" title="Close" @onclick="Close"><Icon Name="x" /></button>
+            </div>
+        </div>
+
+        <div class="drawer-tabs">
+            @foreach (var tab in Tabs)
+            {
+                <button class="drawer-tab @(_activeTab == tab ? "active" : "")" @onclick="() => _activeTab = tab">@tab</button>
+            }
+        </div>
+
+        <div class="drawer-body">
+            @if (_activeTab == "Personal")
+            {
+                <div class="form-row">
+                    <label>Staff photo</label>
+                    @if (_editMode)
+                    {
+                        <InputFile OnChange="OnPhotoSelected" accept=".jpg,.jpeg,.png,.webp" />
+                        @if (_photoError != null) { <div class="stat-sub" style="color: var(--danger)">@_photoError</div> }
+                    }
+                    else if (string.IsNullOrEmpty(Working.PhotoRelativePath))
+                    {
+                        <div class="stat-sub">No photo uploaded.</div>
+                    }
+                </div>
+
+                <div class="form-row">
+                    <label>Staff code</label>
+                    <input type="text" value="@Working.StaffCode" @oninput="OnStaffCodeInput"
+                           readonly="@(!_editMode)" maxlength="20" style="font-family: ui-monospace, monospace;" />
+                    <div class="stat-sub" style="margin-top:4px;">
+                        Letters, numbers, and - _ / . only — customize to match your school's own ID format.
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>First name</label>
+                        <input type="text" @bind="Working.FirstName" readonly="@(!_editMode)" />
+                    </div>
+                    <div class="form-row">
+                        <label>Initial</label>
+                        <input type="text" @bind="Working.Initial" readonly="@(!_editMode)" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label>Display name</label>
+                    <input type="text" @bind="Working.DisplayName" readonly="@(!_editMode)" />
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Email address</label>
+                        <input type="email" @bind="Working.EmailAddress" readonly="@(!_editMode)" autocomplete="off" />
+                    </div>
+                    <div class="form-row">
+                        <label>Phone number</label>
+                        <input type="tel" @bind="Working.PhoneNumber" readonly="@(!_editMode)" autocomplete="off" />
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Alternate phone</label>
+                        <input type="tel" @bind="Working.AlternatePhoneNumber" readonly="@(!_editMode)" autocomplete="off" />
+                    </div>
+                    <div class="form-row">
+                        <label>WhatsApp number</label>
+                        <input type="tel" @bind="Working.WhatsappNumber" readonly="@(!_editMode)" autocomplete="off" />
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <label>Complete address</label>
+                    <textarea rows="2" @bind="Working.CompleteAddress" readonly="@(!_editMode)" autocomplete="off"></textarea>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Bus number</label>
+                        <input type="text" @bind="Working.BusNumber" readonly="@(!_editMode)" autocomplete="off" />
+                    </div>
+                    <div class="form-row">
+                        <label>Date of joining</label>
+                        <input type="date" @bind="Working.DateOfJoining" disabled="@(!_editMode)" />
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <label>Designation</label>
+                    <select @bind="Working.Designation" @bind:after="OnDesignationChanged" disabled="@(!_editMode)">
+                        <option value="Teaching">Teaching</option>
+                        <option value="NonTeaching">Non-Teaching</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <label>Sub-designation</label>
+                    <SubDesignationPicker Category="Working.Designation" @bind-Value="Working.SubDesignation" Disabled="@(!_editMode)" />
+                </div>
+
+                <div class="stat-sub">Account created @Working.CreatedAtUtc.ToLocalTime().ToString("dd MMM yyyy")</div>
+            }
+            else if (_activeTab == "Statutory")
+            {
+                <div class="form-row">
+                    <label>PAN number</label>
+                    <MaskedField @bind-Value="Working.PanNumber" Disabled="@(!_editMode)" Placeholder="ABCDE1234F" />
+                </div>
+                <div class="form-row">
+                    <label>Aadhaar number</label>
+                    <MaskedField @bind-Value="Working.AadhaarNumber" Disabled="@(!_editMode)" Placeholder="12-digit number" />
+                </div>
+                <div class="form-row">
+                    <label>EPF Unified Account Number (UAN)</label>
+                    <input type="text" @bind="Working.EpfUan" readonly="@(!_editMode)" />
+                    <div class="stat-sub" style="margin-top: 4px;">
+                        Filling this in enables EPF calculations on the Salary tab; clearing it disables them.
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label>EPF portal password</label>
+                    <MaskedField @bind-Value="Working.EpfPassword" Disabled="@(!_editMode)" Placeholder="Portal login password" />
+                </div>
+                <div class="form-row">
+                    <label>ESIC number</label>
+                    <input type="text" @bind="Working.EsicNumber" readonly="@(!_editMode)" />
+                    <div class="stat-sub" style="margin-top: 4px;">
+                        Filling this in enables ESIC calculations on the Salary tab; clearing it disables them.
+                    </div>
+                </div>
+            }
+            else if (_activeTab == "Banking")
+            {
+                <div class="form-row">
+                    <label>Bank account number</label>
+                    <input type="text" @bind="Working.BankAccountNumber" readonly="@(!_editMode)" />
+                </div>
+                <div class="form-row">
+                    <label>Bank IFSC code</label>
+                    <input type="text" @bind="Working.BankIfscCode" readonly="@(!_editMode)" style="text-transform: uppercase;" />
+                </div>
+                <div class="form-row">
+                    <label>Payment mode</label>
+                    <select @bind="Working.BankMode" disabled="@(!_editMode)">
+                        <option value="IobBulkUpload">IOB bulk upload</option>
+                        <option value="ManualNeft">Manual NEFT/RTGS</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>Bank passbook photo</label>
+                    @if (_editMode)
+                    {
+                        <InputFile OnChange="OnPassbookSelected" accept=".jpg,.jpeg,.png,.webp" />
+                        @if (_passbookError != null) { <div class="stat-sub" style="color: var(--danger)">@_passbookError</div> }
+                    }
+                    else if (string.IsNullOrEmpty(Working.BankPassbookRelativePath))
+                    {
+                        <div class="stat-sub">No passbook photo uploaded.</div>
+                    }
+                    @if (!string.IsNullOrEmpty(Working.BankPassbookRelativePath))
+                    {
+                        <div class="stat-sub" style="margin-top:6px;">
+                            <a href="@($"/{Working.BankPassbookRelativePath}")" target="_blank">View uploaded passbook</a>
+                        </div>
+                    }
+                </div>
+            }
+            else if (_activeTab == "Salary")
+            {
+                <div class="alert @(Working.IsEpfEnabled || Working.IsEsicEnabled ? "success" : "warning")" style="margin-top: 0;">
+                    <strong>EPF:</strong> @(Working.IsEpfEnabled ? "Enrolled (UAN on file)" : "Not enrolled — no UAN on file")
+                    <br />
+                    <strong>ESIC:</strong> @(Working.IsEsicEnabled ? "Enrolled (ESIC number on file)" : "Not enrolled — no ESIC number on file")
+                    <div class="stat-sub" style="margin-top: 6px; color: inherit;">
+                        Enrollment is controlled by the Statutory tab — add or clear the EPF UAN / ESIC number there to turn calculations on or off. There's no separate switch.
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <label>Gross pay (₹)</label>
+                    <input type="number" min="0" step="1" value="@Working.GrossPay" @oninput="OnGrossPayInput"
+                           readonly="@(!_editMode)" style="font-size: 16px; font-weight: 600;" />
+                </div>
+
+                <div class="form-row">
+                    <label>Net pay (₹)</label>
+                    <input type="number" min="0" step="1" value="@_calc.NetPay" @oninput="OnNetPayInput"
+                           readonly="@(!_editMode)" style="font-size: 16px; font-weight: 600;" />
+                    <div class="stat-sub" style="margin-top:4px;">
+                        Edit either figure — the other, and all deductions below, recalculate automatically.
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 18px;">Statutory calculations (auto-computed)</h3>
+                <div class="calc-panel">
+                    <div class="calc-row"><span>Basic wage @(Working.IsEpfEnabled ? "(50% of Gross)" : "(EPF not enrolled)")</span><span class="val">₹@Fmt(_calc.BasicWage)</span></div>
+                    <div class="calc-row"><span>Employee EPF (12% of Basic)</span><span class="val deduction">−₹@Fmt(_calc.EmployeeEpf)</span></div>
+                    <div class="calc-row">
+                        <span>
+                            Employee ESIC @(_calc.EsicApplicable ? "(0.75% of Gross)" : "(not enrolled)")
+                            @if (_calc.EsicApplicable && _calc.GrossOverEsicThreshold)
+                            {
+                                <span title="Gross has crossed ₹21,000. Per ESIC rules, contribution continues for the rest of the current contribution period even after crossing the threshold — this isn't a bug.">⚠</span>
+                            }
+                        </span>
+                        <span class="val deduction">−₹@Fmt(_calc.EmployeeEsic)</span>
+                    </div>
+                    <div class="calc-row total"><span>Net pay</span><span class="val">₹@Fmt(_calc.NetPay)</span></div>
+                </div>
+
+                <h3 style="margin-top: 18px;">Employer-side contributions (informational)</h3>
+                <div class="calc-panel">
+                    <div class="calc-row"><span>Employer EPS (8.33% of Basic, capped ₹15,000)</span><span class="val">₹@Fmt(_calc.EmployerEps)</span></div>
+                    <div class="calc-row"><span>Employer EPF (balance)</span><span class="val">₹@Fmt(_calc.EmployerEpf)</span></div>
+                    <div class="calc-row"><span>EDLI & admin charges (1% of Basic, capped ₹15,000)</span><span class="val">₹@Fmt(_calc.EdliAndAdmin)</span></div>
+                    <div class="calc-row"><span>Employer ESIC @(_calc.EsicApplicable ? "(3.25% of Gross)" : "(not enrolled)")</span><span class="val">₹@Fmt(_calc.EmployerEsic)</span></div>
+                    <div class="calc-row total"><span>Cost to institution</span><span class="val">₹@Fmt(_calc.CostToInstitution)</span></div>
+                </div>
+            }
+        </div>
+
+        @if (_editMode)
+        {
+            <div class="drawer-footer" style="flex-direction: column; align-items: stretch; gap: 10px;">
+                @if (!string.IsNullOrEmpty(_saveError))
+                {
+                    <div class="alert danger" style="margin: 0;">@_saveError</div>
+                }
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="secondary" @onclick="CancelEdit" disabled="@_saving">Cancel</button>
+                    <button class="primary" @onclick="SaveAsync" disabled="@_saving">
+                        @(_saving ? "Saving…" : "Save changes")
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public Staff? StaffMember { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private static readonly string[] Tabs = { "Personal", "Statutory", "Banking", "Salary" };
+    private string _activeTab = "Personal";
+    private bool _editMode;
+    private bool _saving;
+    private string? _saveError;
+    private string? _photoError;
+    private string? _passbookError;
+
+    // Working copy so Cancel can discard edits without mutating the caller's object
+    private Staff? Working;
+    private StatutoryBreakdown _calc = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, false, false, false, false);
+
+    protected override void OnParametersSet()
+    {
+        if (StaffMember != null && (Working == null || Working.Id != StaffMember.Id))
+        {
+            Working = Clone(StaffMember);
+            _editMode = false;
+            _activeTab = "Personal";
+            Recalc();
+        }
+    }
+
+    private void EnterEditMode() { _editMode = true; _saveError = null; }
+
+    private void OnDesignationChanged()
+    {
+        if (Working != null) Working.SubDesignation = null;
+    }
+
+    private void CancelEdit()
+    {
+        if (StaffMember != null) Working = Clone(StaffMember);
+        _editMode = false;
+        _saveError = null;
+        Recalc();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Working == null) return;
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            await StaffService.UpdateAsync(Working);
+            _editMode = false;
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _saveError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+            Recalc();
+        }
+    }
+
+    private async Task Close() => await VisibleChanged.InvokeAsync(false);
+
+    private void Recalc()
+    {
+        if (Working == null) return;
+        _calc = Calculator.Compute(Working.GrossPay, Working.IsEpfEnabled, Working.IsEsicEnabled, Working.NetPayOverride);
+    }
+
+    private void OnStaffCodeInput(ChangeEventArgs e)
+    {
+        if (Working == null) return;
+        var raw = e.Value?.ToString() ?? "";
+        var sanitized = System.Text.RegularExpressions.Regex.Replace(raw, @"[^A-Za-z0-9\-_/.]", "");
+        if (sanitized.Length > 20) sanitized = sanitized[..20];
+        Working.StaffCode = sanitized;
+    }
+
+    private void OnGrossPayInput(ChangeEventArgs e)
+    {
+        if (Working == null) return;
+        var text = e.Value?.ToString();
+        Working.GrossPay = decimal.TryParse(text, out var v) ? v : 0;
+        // Gross is now the driver — clear any pinned Net so it's purely computed.
+        Working.NetPayOverride = null;
+        Recalc();
+    }
+
+    private void OnNetPayInput(ChangeEventArgs e)
+    {
+        if (Working == null) return;
+        var text = e.Value?.ToString();
+        var typedNet = decimal.TryParse(text, out var v) ? v : 0;
+
+        // Solve backward for the Gross that produces this Net...
+        Working.GrossPay = Calculator.InverseGrossFromNet(typedNet, Working.IsEpfEnabled, Working.IsEsicEnabled);
+        // ...and pin the exact typed value so display matches what was typed,
+        // even if the inverse calculation has a paisa of rounding drift.
+        Working.NetPayOverride = typedNet;
+        Recalc();
+    }
+
+    private async Task OnPhotoSelected(InputFileChangeEventArgs e)
+    {
+        if (Working == null) return;
+        _photoError = null;
+        try
+        {
+            var path = await PhotoService.SaveAsync(Working.Id, e.File);
+            Working.PhotoRelativePath = path;
+        }
+        catch (Exception ex)
+        {
+            _photoError = ex.Message;
+        }
+    }
+
+    private async Task OnPassbookSelected(InputFileChangeEventArgs e)
+    {
+        if (Working == null) return;
+        _passbookError = null;
+        try
+        {
+            var path = await PhotoService.SaveAsync(Working.Id, e.File);
+            Working.BankPassbookRelativePath = path;
+        }
+        catch (Exception ex)
+        {
+            _passbookError = ex.Message;
+        }
+    }
+
+    private static Staff Clone(Staff s) => new()
+    {
+        Id = s.Id, StaffCode = s.StaffCode, DisplayOrder = s.DisplayOrder,
+        FirstName = s.FirstName, Initial = s.Initial, DisplayName = s.DisplayName, PhotoRelativePath = s.PhotoRelativePath,
+        EmailAddress = s.EmailAddress, PhoneNumber = s.PhoneNumber, AlternatePhoneNumber = s.AlternatePhoneNumber,
+        WhatsappNumber = s.WhatsappNumber, CompleteAddress = s.CompleteAddress, BusNumber = s.BusNumber,
+        Designation = s.Designation, SubDesignation = s.SubDesignation, DateOfJoining = s.DateOfJoining,
+        PanNumber = s.PanNumber, AadhaarNumber = s.AadhaarNumber, EpfUan = s.EpfUan, EpfPassword = s.EpfPassword, EsicNumber = s.EsicNumber,
+        BankAccountNumber = s.BankAccountNumber, BankIfscCode = s.BankIfscCode, BankPassbookRelativePath = s.BankPassbookRelativePath, BankMode = s.BankMode,
+        GrossPay = s.GrossPay, NetPayOverride = s.NetPayOverride,
+        IsActive = s.IsActive, SoftDeletedAtUtc = s.SoftDeletedAtUtc, SoftDeleteReason = s.SoftDeleteReason,
+        CreatedAtUtc = s.CreatedAtUtc, CreatedByObjectId = s.CreatedByObjectId, CreatedByDisplayName = s.CreatedByDisplayName,
+        LastModifiedAtUtc = s.LastModifiedAtUtc, LastModifiedByObjectId = s.LastModifiedByObjectId, LastModifiedByDisplayName = s.LastModifiedByDisplayName
+    };
+
+    private static string Fmt(decimal v) => v.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("en-IN"));
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        if (parts.Length == 1) return parts[0][..Math.Min(2, parts[0].Length)].ToUpper();
+        return $"{parts[0][0]}{parts[^1][0]}".ToUpper();
+    }
+}

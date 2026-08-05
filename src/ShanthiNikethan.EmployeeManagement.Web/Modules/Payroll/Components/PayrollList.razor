@@ -1,0 +1,166 @@
+@page "/payroll"
+@inject IPayrollService PayrollService
+@inject NavigationManager Nav
+
+<h1>Payroll</h1>
+
+<div class="page-header">
+    <button class="primary" @onclick="() => _showCreateDialog = true">
+        <Icon Name="plus" Size="16" /> Create payroll run
+    </button>
+</div>
+
+@if (_loading)
+{
+    <p class="stat-sub">Loading…</p>
+}
+else if (_runs.Count == 0)
+{
+    <div class="empty-state">
+        <div class="icon"><Icon Name="file-text" Size="36" /></div>
+        <p>No payroll runs yet. Create one to generate this month's bank files and wage statement.</p>
+    </div>
+}
+else
+{
+    <div class="table-scroll">
+    <table class="grid">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th class="right">Created</th>
+                <th class="right">Published</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var run in _runs)
+            {
+                <tr @onclick="() => OpenRun(run.Id)">
+                    <td>@run.MonthLabel</td>
+                    <td>@run.RunTypeLabel</td>
+                    <td>
+                        @if (run.Status == PayrollRunStatus.Published)
+                        {
+                            <span class="badge active">Published</span>
+                        }
+                        else
+                        {
+                            <span class="badge pending">Draft</span>
+                        }
+                    </td>
+                    <td class="right stat-sub">@run.CreatedAtUtc.ToLocalTime().ToString("dd MMM yyyy")</td>
+                    <td class="right stat-sub">@(run.PublishedAtUtc?.ToLocalTime().ToString("dd MMM yyyy") ?? "—")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    </div>
+}
+
+@if (_showCreateDialog)
+{
+    <div class="modal-backdrop" @onclick="() => _showCreateDialog = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Create payroll run</h2>
+            <div class="form-row">
+                <label>Month</label>
+                <MonthYearPicker Value="@_selectedMonth" ValueChanged="v => _selectedMonth = v" />
+            </div>
+            <div class="form-row">
+                <label>Type</label>
+                <select @bind="_selectedRunType">
+                    <option value="RegularSalary">Regular Salary</option>
+                    <option value="PerformanceIncentive">Performance Incentive</option>
+                    <option value="SpecialClassAllowance">Special Class Allowance</option>
+                    <option value="PongalBonus">Pongal Bonus</option>
+                    <option value="Other">Other…</option>
+                </select>
+            </div>
+            @if (_selectedRunType == "Other")
+            {
+                <div class="form-row">
+                    <label>Label for this payment</label>
+                    <input type="text" @bind="_otherLabel" placeholder="e.g. Diwali Bonus" maxlength="100" />
+                </div>
+            }
+            <div class="stat-sub">
+                @if (_selectedRunType == "RegularSalary")
+                {
+                    <text>Snapshots every currently active staff member's current Net Pay.</text>
+                }
+                else
+                {
+                    <text>Starts every active staff member at ₹0 — you'll edit in amounts for actual recipients and remove everyone else from the draft. Base Net Pay is never touched, so this can't accidentally duplicate a salary payment.</text>
+                }
+                Once created, you can review before publishing — publishing locks the numbers permanently.
+            </div>
+            @if (!string.IsNullOrEmpty(_createError))
+            {
+                <div class="alert danger">@_createError</div>
+            }
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _showCreateDialog = false">Cancel</button>
+                <button class="primary" @onclick="CreateRunAsync" disabled="@_creating">
+                    @(_creating ? "Creating…" : "Create")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<PayrollRun> _runs = new();
+    private bool _loading;
+    private bool _showCreateDialog;
+    private bool _creating;
+    private string? _createError;
+    private string _selectedMonth = DateTime.Today.ToString("yyyy-MM");
+    private string _selectedRunType = "RegularSalary";
+    private string _otherLabel = "";
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _runs = await PayrollService.ListRunsAsync();
+        _loading = false;
+    }
+
+    private async Task CreateRunAsync()
+    {
+        _createError = null;
+        if (!DateOnly.TryParse(_selectedMonth + "-01", out var parsed))
+        {
+            _createError = "Pick a valid month.";
+            return;
+        }
+
+        var runType = Enum.Parse<PayrollRunType>(_selectedRunType);
+        if (runType == PayrollRunType.Other && string.IsNullOrWhiteSpace(_otherLabel))
+        {
+            _createError = "Enter a label for this payment type.";
+            return;
+        }
+
+        _creating = true;
+        try
+        {
+            var run = await PayrollService.CreateDraftAsync(parsed.Year, parsed.Month, runType, _otherLabel);
+            _showCreateDialog = false;
+            OpenRun(run.Id);
+        }
+        catch (Exception ex)
+        {
+            _createError = ex.InnerException != null ? $"{ex.Message} — {ex.InnerException.Message}" : ex.Message;
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+
+    private void OpenRun(Guid id) => Nav.NavigateTo($"/payroll/{id}");
+}

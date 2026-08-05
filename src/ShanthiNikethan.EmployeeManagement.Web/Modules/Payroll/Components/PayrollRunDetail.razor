@@ -1,0 +1,335 @@
+@page "/payroll/{RunId:guid}"
+@inject IPayrollService PayrollService
+@inject IPayrollExportService ExportService
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@if (_run == null)
+{
+    <p class="stat-sub">Loading…</p>
+}
+else
+{
+    <div class="page-header">
+        <button class="secondary" @onclick="@(() => Nav.NavigateTo("/payroll"))">
+            <Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /> Back to payroll runs
+        </button>
+        @if (_run.Status == PayrollRunStatus.Draft)
+        {
+            <button class="danger" @onclick="() => _showDeleteConfirm = true">
+                <Icon Name="trash-2" Size="14" /> Discard draft
+            </button>
+            <button class="primary" @onclick="() => _showPublishConfirm = true">
+                <Icon Name="check" Size="16" /> Publish & lock
+            </button>
+        }
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+        <h1 style="margin-bottom: 0;">
+            @_run.MonthLabel
+            <span class="badge" style="margin-left: 8px; background: var(--bg-surface-alt); color: var(--text-secondary);">@_run.RunTypeLabel</span>
+            @if (_run.Status == PayrollRunStatus.Published)
+            {
+                <span class="badge active" style="margin-left: 4px;">Published</span>
+            }
+            else
+            {
+                <span class="badge pending" style="margin-left: 4px;">Draft</span>
+            }
+        </h1>
+        <button class="icon-btn" title="@(_netPayRevealed ? "Hide amounts" : "Show amounts")" @onclick="ToggleNetPayReveal">
+            <Icon Name="@(_netPayRevealed ? "eye" : "eye-off")" Size="18" />
+        </button>
+    </div>
+    <p class="stat-sub" style="margin-bottom: 20px;">
+        Created @_run.CreatedAtUtc.ToLocalTime().ToString("dd MMM yyyy, h:mm tt") by @_run.CreatedByDisplayName
+        @if (_run.Status == PayrollRunStatus.Published)
+        {
+            <text> · Published @_run.PublishedAtUtc?.ToLocalTime().ToString("dd MMM yyyy, h:mm tt") by @_run.PublishedByDisplayName</text>
+        }
+    </p>
+
+    <div class="calc-panel" style="margin-bottom: 20px;">
+        <div class="calc-row">
+            <span>Teaching staff (@_teachingCount)</span>
+            <span class="val">@(_netPayRevealed ? $"₹{_teachingTotal:N0}" : "₹••••••")</span>
+        </div>
+        <div class="calc-row">
+            <span>Non-Teaching staff (@_nonTeachingCount)</span>
+            <span class="val">@(_netPayRevealed ? $"₹{_nonTeachingTotal:N0}" : "₹••••••")</span>
+        </div>
+        <div class="calc-row total">
+            <span>Total (@_lineItems.Count)</span>
+            <span class="val">@(_netPayRevealed ? $"₹{_grandTotal:N0}" : "₹••••••")</span>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <button class="secondary" @onclick="() => DownloadCsvAsync(StaffDesignation.Teaching)" disabled="@_downloading">
+            <Icon Name="download" Size="14" /> Teaching CSV
+        </button>
+        <button class="secondary" @onclick="() => DownloadCsvAsync(StaffDesignation.NonTeaching)" disabled="@_downloading">
+            <Icon Name="download" Size="14" /> Non-Teaching CSV
+        </button>
+        <button class="secondary" @onclick="DownloadPdfAsync" disabled="@_downloading">
+            <Icon Name="download" Size="14" /> Wage statement PDF
+        </button>
+        @if (_run.Status == PayrollRunStatus.Draft)
+        {
+            @if (_selectedIds.Count > 0)
+            {
+                <span class="stat-sub">@_selectedIds.Count selected</span>
+            }
+            <button class="danger" @onclick="RemoveSelectedAsync" disabled="@(_selectedIds.Count == 0 || _removing)">
+                <Icon Name="trash-2" Size="14" /> Remove from this run
+            </button>
+        }
+    </div>
+
+    <div class="table-scroll">
+    <table class="grid">
+        <thead>
+            <tr>
+                @if (_run.Status == PayrollRunStatus.Draft)
+                {
+                    <th style="width: 34px" class="checkbox-cell">
+                        <input type="checkbox" title="Select all" checked="@AllSelected" @onchange="ToggleSelectAll" />
+                    </th>
+                }
+                <th class="sortable" @onclick='() => SetSort("name")'>Name @SortArrow("name")</th>
+                <th class="sortable" @onclick='() => SetSort("designation")'>Designation @SortArrow("designation")</th>
+                <th class="sortable" @onclick='() => SetSort("account")'>Account number @SortArrow("account")</th>
+                <th class="sortable" style="width: 90px" @onclick='() => SetSort("bank")'>Bank @SortArrow("bank")</th>
+                <th class="sortable right" @onclick='() => SetSort("netpay")'>Amount @SortArrow("netpay")</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var li in SortedLineItems)
+            {
+                var isSelected = _selectedIds.Contains(li.Id);
+                <tr class="@(isSelected ? "selected" : "")">
+                    @if (_run.Status == PayrollRunStatus.Draft)
+                    {
+                        <td class="checkbox-cell">
+                            <input type="checkbox" checked="@isSelected" @onchange="e => ToggleRow(li.Id, (bool)e.Value!)" />
+                        </td>
+                    }
+                    <td>@li.DisplayName <span class="stat-sub">@li.StaffCode</span></td>
+                    <td>@li.Designation</td>
+                    <td>@li.BankAccountNumber</td>
+                    <td>
+                        @if (li.BankMode == BankPaymentMode.IobBulkUpload)
+                        {
+                            <span class="badge iob">IOB</span>
+                        }
+                        else
+                        {
+                            <span class="badge manual" title="Excluded from bank CSV — paid manually">Manual</span>
+                        }
+                    </td>
+                    <td class="right">
+                        @if (_run.Status == PayrollRunStatus.Draft && !_run.IsRegularSalary)
+                        {
+                            <input type="number" min="0" step="1" value="@li.NetPay.ToString("0")"
+                                   style="width: 110px; text-align: right; display: inline-block;"
+                                   @onchange="e => OnAmountChanged(li, e)" />
+                        }
+                        else
+                        {
+                            @(_netPayRevealed ? $"₹{li.NetPay:N0}" : "₹••••••")
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    </div>
+}
+
+@if (_showPublishConfirm)
+{
+    <div class="modal-backdrop" @onclick="() => _showPublishConfirm = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Publish @_run?.MonthLabel?</h2>
+            <div class="alert warning">
+                This locks every number in this run permanently — Net Pay, bank details, everyone included. Even if a staff member's current salary changes later, this filed record stays exactly as it is now. This cannot be undone.
+            </div>
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _showPublishConfirm = false">Cancel</button>
+                <button class="primary" @onclick="PublishAsync" disabled="@_publishing">
+                    @(_publishing ? "Publishing…" : "Publish & lock")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showDeleteConfirm)
+{
+    <div class="modal-backdrop" @onclick="() => _showDeleteConfirm = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Discard this draft?</h2>
+            <div class="modal-body">This deletes the draft entirely. Nothing has been filed yet, so this is safe — you can create a new run for the same month afterward.</div>
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _showDeleteConfirm = false">Cancel</button>
+                <button class="danger" @onclick="DeleteAsync">Discard</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid RunId { get; set; }
+
+    private PayrollRun? _run;
+    private List<PayrollLineItem> _lineItems = new();
+    private bool _showPublishConfirm;
+    private bool _showDeleteConfirm;
+    private bool _publishing;
+    private bool _downloading;
+    private string _sortColumn = "name";
+    private bool _sortDescending = false;
+    private bool _netPayRevealed = false;
+    private HashSet<Guid> _selectedIds = new();
+    private bool _removing;
+
+    private void ToggleNetPayReveal() => _netPayRevealed = !_netPayRevealed;
+
+    private bool AllSelected => SortedLineItems.Any() && SortedLineItems.All(li => _selectedIds.Contains(li.Id));
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        var check = (bool)e.Value!;
+        _selectedIds.Clear();
+        if (check) foreach (var li in SortedLineItems) _selectedIds.Add(li.Id);
+    }
+
+    private void ToggleRow(Guid id, bool check)
+    {
+        if (check) _selectedIds.Add(id);
+        else _selectedIds.Remove(id);
+    }
+
+    private async Task RemoveSelectedAsync()
+    {
+        _removing = true;
+        try
+        {
+            await PayrollService.RemoveLineItemsAsync(RunId, _selectedIds.ToList());
+            _selectedIds.Clear();
+            await ReloadAsync();
+        }
+        finally
+        {
+            _removing = false;
+        }
+    }
+
+    private async Task OnAmountChanged(PayrollLineItem li, ChangeEventArgs e)
+    {
+        if (!decimal.TryParse(e.Value?.ToString(), out var newAmount) || newAmount < 0) return;
+        await PayrollService.UpdateLineItemAmountAsync(li.Id, newAmount);
+        li.NetPay = newAmount; // update in-memory so totals recompute without a full reload
+    }
+
+    private List<PayrollLineItem> SortedLineItems
+    {
+        get
+        {
+            IEnumerable<PayrollLineItem> q = _lineItems;
+            q = _sortColumn switch
+            {
+                "name" => _sortDescending ? q.OrderByDescending(li => li.DisplayName) : q.OrderBy(li => li.DisplayName),
+                "designation" => _sortDescending
+                    ? q.OrderByDescending(li => li.Designation).ThenBy(li => li.DisplayName)
+                    : q.OrderBy(li => li.Designation).ThenBy(li => li.DisplayName),
+                "account" => _sortDescending ? q.OrderByDescending(li => li.BankAccountNumber) : q.OrderBy(li => li.BankAccountNumber),
+                "bank" => _sortDescending
+                    ? q.OrderByDescending(li => li.BankMode).ThenBy(li => li.DisplayName)
+                    : q.OrderBy(li => li.BankMode).ThenBy(li => li.DisplayName),
+                "netpay" => _sortDescending ? q.OrderByDescending(li => li.NetPay) : q.OrderBy(li => li.NetPay),
+                _ => q
+            };
+            return q.ToList();
+        }
+    }
+
+    private void SetSort(string column)
+    {
+        if (_sortColumn == column) _sortDescending = !_sortDescending;
+        else { _sortColumn = column; _sortDescending = false; }
+    }
+
+    private string SortArrow(string column) => _sortColumn != column ? "" : (_sortDescending ? "▼" : "▲");
+
+    private int _teachingCount => _lineItems.Count(li => li.Designation == StaffDesignation.Teaching);
+    private int _nonTeachingCount => _lineItems.Count(li => li.Designation == StaffDesignation.NonTeaching);
+    private decimal _teachingTotal => _lineItems.Where(li => li.Designation == StaffDesignation.Teaching).Sum(li => li.NetPay);
+    private decimal _nonTeachingTotal => _lineItems.Where(li => li.Designation == StaffDesignation.NonTeaching).Sum(li => li.NetPay);
+    private decimal _grandTotal => _lineItems.Sum(li => li.NetPay);
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _run = await PayrollService.GetRunAsync(RunId);
+        if (_run != null)
+            _lineItems = await PayrollService.GetLineItemsAsync(RunId);
+    }
+
+    private async Task PublishAsync()
+    {
+        _publishing = true;
+        try
+        {
+            await PayrollService.PublishAsync(RunId);
+            _showPublishConfirm = false;
+            await ReloadAsync();
+        }
+        finally
+        {
+            _publishing = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        await PayrollService.DeleteDraftAsync(RunId);
+        Nav.NavigateTo("/payroll");
+    }
+
+    private async Task DownloadCsvAsync(StaffDesignation designation)
+    {
+        if (_run == null) return;
+        _downloading = true;
+        try
+        {
+            var bytes = ExportService.GenerateCsv(_run, _lineItems, designation);
+            var base64 = Convert.ToBase64String(bytes);
+            var fileName = $"IOB{designation}Staff{_run.RunTypeLabel.Replace(" ", "")}{_run.MonthLabel.Replace(" ", "")}.csv";
+            await JS.InvokeVoidAsync("siteHelpers.downloadFile", fileName, base64, "text/csv");
+        }
+        finally
+        {
+            _downloading = false;
+        }
+    }
+
+    private async Task DownloadPdfAsync()
+    {
+        if (_run == null) return;
+        _downloading = true;
+        try
+        {
+            var bytes = ExportService.GeneratePdf(_run, _lineItems);
+            var base64 = Convert.ToBase64String(bytes);
+            var fileName = $"{_run.RunTypeLabel.Replace(" ", "")}Statement{_run.MonthLabel.Replace(" ", "")}.pdf";
+            await JS.InvokeVoidAsync("siteHelpers.downloadFile", fileName, base64, "application/pdf");
+        }
+        finally
+        {
+            _downloading = false;
+        }
+    }
+}

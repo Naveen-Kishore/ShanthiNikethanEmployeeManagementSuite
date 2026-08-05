@@ -1,0 +1,1039 @@
+@page "/leave"
+@inject ILeaveService LeaveService
+@inject IStaffProfileService StaffService
+
+<h1>Leave Management</h1>
+
+<div class="page-header">
+    <button class="primary" @onclick="OpenAddDialog">
+        <Icon Name="plus" Size="16" /> Add leave record
+    </button>
+</div>
+
+<div class="filter-tabs" style="margin-bottom: 18px; width: fit-content;">
+    <button class="filter-tab @(_viewMode == "week" ? "active" : "")" @onclick='() => SwitchView("week")'>This Week</button>
+    <button class="filter-tab @(_viewMode == "month" ? "active" : "")" @onclick='() => SwitchView("month")'>This Month</button>
+    <button class="filter-tab @(_viewMode == "year" ? "active" : "")" @onclick='() => SwitchView("year")'>This Year</button>
+    <button class="filter-tab @(_viewMode == "employee" ? "active" : "")" @onclick='() => SwitchView("employee")'>By Employee</button>
+</div>
+
+@if (_viewMode == "week")
+{
+    <div class="toolbar">
+        <input type="date" value="@_weekPickerDate.ToString("yyyy-MM-dd")" @onchange="OnWeekDatePicked" style="width: auto;" />
+        <button class="secondary" @onclick="() => ShiftWeek(-7)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /> Previous</button>
+        <button class="secondary" @onclick="ResetToThisWeek">This week</button>
+        <button class="secondary" @onclick="() => ShiftWeek(7)">Next <Icon Name="chevron-down" Size="14" Style="transform: rotate(-90deg);" /></button>
+    </div>
+
+    @if (_weekLoading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            @foreach (var day in WeekDays)
+            {
+                var dayRecords = _weekRecords.Where(r => day >= r.StartDate && day <= r.EndDate).OrderBy(r => r.StaffDisplayName).ToList();
+                var isToday = day == DateOnly.FromDateTime(DateTime.Today);
+                <div class="calc-panel" style='@(isToday ? "border-color: var(--accent);" : "")'>
+                    <div style='display: flex; align-items: baseline; gap: 8px; margin-bottom: @(dayRecords.Count > 0 ? "10px" : "0")'>
+                        <strong>@day.ToString("dddd, dd MMM")</strong>
+                        @if (isToday)
+                        {
+                            <span class="badge active">Today</span>
+                        }
+                        @if (dayRecords.Count == 0)
+                        {
+                            <span class="stat-sub">— nobody on leave</span>
+                        }
+                    </div>
+                    @if (dayRecords.Count > 0)
+                    {
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
+                            @foreach (var r in dayRecords)
+                            {
+                                var (accent, bg, fg) = ChipColorFor(r.StaffId);
+                                var photoPath = GetStaffPhotoPath(r.StaffId);
+                                var chipTitle = string.IsNullOrWhiteSpace(r.Reason) ? $"{r.StaffDisplayName} · {r.Designation}" : $"{r.StaffDisplayName} · {r.Designation} — {r.Reason}";
+                                <div @onclick="() => OpenEditDialog(r)" title="@chipTitle"
+                                     style="background: @bg; color: @fg; border-left: 3px solid @accent; font-size: 12px; font-weight: 600; padding: 4px 10px 4px 8px; border-radius: 3px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                                    <div class="leave-chip-avatar" style="background: @accent;">
+                                        @if (!string.IsNullOrEmpty(photoPath))
+                                        {
+                                            <img src="@($"/{photoPath}")" alt="" />
+                                        }
+                                        else
+                                        {
+                                            @Initials(r.StaffDisplayName)
+                                        }
+                                    </div>
+                                    <span class="leave-chip-full">@r.StaffDisplayName</span>
+                                </div>
+                            }
+                        </div>
+                        @foreach (var r in dayRecords.Where(r => !string.IsNullOrWhiteSpace(r.SubstituteArrangementNotes)))
+                        {
+                            <div class="stat-sub" style="white-space: pre-line; padding-bottom: 4px;"><strong>@r.StaffDisplayName:</strong> @r.SubstituteArrangementNotes</div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+else if (_viewMode == "month")
+{
+    <div class="toolbar">
+        <input type="date" value="@_monthPickerDate.ToString("yyyy-MM-dd")" @onchange="OnMonthDatePicked" style="width: auto;" />
+        <button class="secondary" @onclick="() => ShiftSelectedMonth(-1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /> Previous</button>
+        <button class="secondary" @onclick="() => ShiftSelectedMonth(1)">Next <Icon Name="chevron-down" Size="14" Style="transform: rotate(-90deg);" /></button>
+        <select value="@_staffFilter" @onchange="OnStaffFilterChanged" style="width: auto;">
+            <option value="">All staff</option>
+            @foreach (var s in _activeStaff)
+            {
+                <option value="@s.Id">@s.DisplayName</option>
+            }
+        </select>
+        <div class="filter-tabs">
+            <button class="filter-tab @(_monthViewStyle == "calendar" ? "active" : "")" @onclick='() => _monthViewStyle = "calendar"'>Calendar</button>
+            <button class="filter-tab @(_monthViewStyle == "table" ? "active" : "")" @onclick='() => _monthViewStyle = "table"'>Table</button>
+        </div>
+    </div>
+
+    @if (!_monthLoading && _monthRecords.Count > 0)
+    {
+        <div class="calc-panel" style="margin-bottom: 16px;">
+            <div class="calc-row total"><span>Total leave in @MonthViewSelectedMonthName</span><span class="val">@_monthRecords.Sum(r => r.DaysCount) day(s)</span></div>
+        </div>
+    }
+
+    @if (_monthLoading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else if (_monthRecords.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="icon"><Icon Name="calendar" Size="36" /></div>
+            <p>No leave records for this month yet.</p>
+        </div>
+    }
+    else if (_monthViewStyle == "calendar")
+    {
+        var monthParsed = DateOnly.TryParse(_selectedMonth + "-01", out var mp) ? mp : DateOnly.FromDateTime(DateTime.Today);
+        var daysInMonth = DateTime.DaysInMonth(monthParsed.Year, monthParsed.Month);
+        var leadingBlanks = (int)monthParsed.DayOfWeek;
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;">
+            @foreach (var dow in new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" })
+            {
+                <div class="stat-sub" style="font-weight: 600; text-align: center; padding: 4px;">@dow</div>
+            }
+            @for (int i = 0; i < leadingBlanks; i++)
+            {
+                <div></div>
+            }
+            @for (int d = 1; d <= daysInMonth; d++)
+            {
+                var day = new DateOnly(monthParsed.Year, monthParsed.Month, d);
+                var dayRecords = _monthRecords.Where(r => day >= r.StartDate && day <= r.EndDate).OrderBy(r => r.StaffDisplayName).ToList();
+                var isToday = day == DateOnly.FromDateTime(DateTime.Today);
+                <div style='min-height: 76px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; @(isToday ? "border-color: var(--accent); border-width: 2px;" : "")'>
+                    <div class="stat-sub" style='font-weight: @(isToday ? "700" : "500"); cursor: pointer; @(isToday ? "color: var(--accent);" : "")' @onclick="() => OpenDayDetail(day, dayRecords)">@d</div>
+                    @foreach (var r in dayRecords.Take(3))
+                    {
+                        var (accent, bg, fg) = ChipColorFor(r.StaffId);
+                        var photoPath = GetStaffPhotoPath(r.StaffId);
+                        var chipTitle = string.IsNullOrWhiteSpace(r.Reason) ? r.StaffDisplayName : $"{r.StaffDisplayName} — {r.Reason}";
+                        <div @onclick="() => OpenEditDialog(r)" title="@chipTitle"
+                             style="background: @bg; color: @fg; border-left: 3px solid @accent; font-size: 10.5px; font-weight: 600; padding: 2px 5px 2px 4px; border-radius: 2px; margin-top: 3px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px;">
+                            <div class="leave-chip-avatar leave-chip-avatar-sm" style="background: @accent;">
+                                @if (!string.IsNullOrEmpty(photoPath))
+                                {
+                                    <img src="@($"/{photoPath}")" alt="" />
+                                }
+                                else
+                                {
+                                    @Initials(r.StaffDisplayName)
+                                }
+                            </div>
+                            <span class="leave-chip-full">@r.StaffDisplayName</span>
+                        </div>
+                    }
+                    @if (dayRecords.Count > 3)
+                    {
+                        <div class="stat-sub" style="font-size: 10px; margin-top: 2px; cursor: pointer; text-decoration: underline;" @onclick="() => OpenDayDetail(day, dayRecords)">+@(dayRecords.Count - 3) more</div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="table-scroll">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th>Staff</th>
+                    <th>Dates</th>
+                    <th class="right">Days</th>
+                    <th>Reason</th>
+                    <th>Substitute arrangement</th>
+                    <th style="width: 80px"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _monthRecords)
+                {
+                    <tr>
+                        <td>@r.StaffDisplayName <span class="stat-sub">@r.StaffCode</span></td>
+                        <td>
+                            @if (r.StartDate == r.EndDate)
+                            {
+                                @r.StartDate.ToString("dd MMM yyyy")
+                            }
+                            else
+                            {
+                                @($"{r.StartDate:dd MMM} – {r.EndDate:dd MMM yyyy}")
+                            }
+                        </td>
+                        <td class="right">@r.DaysCount</td>
+                        <td>@(string.IsNullOrWhiteSpace(r.Reason) ? "—" : r.Reason)</td>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(r.SubstituteArrangementNotes))
+                            {
+                                <span title="@r.SubstituteArrangementNotes" style="white-space: pre-line;">
+                                    @(r.SubstituteArrangementNotes.Length > 60 ? r.SubstituteArrangementNotes[..60] + "…" : r.SubstituteArrangementNotes)
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="stat-sub">—</span>
+                            }
+                        </td>
+                        <td class="right">
+                            <button class="icon-btn" title="Edit" @onclick="() => OpenEditDialog(r)"><Icon Name="pencil" Size="14" /></button>
+                            <button class="icon-btn" title="Delete" @onclick="() => OpenDeleteConfirm(r)"><Icon Name="trash-2" Size="14" /></button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+}
+else if (_viewMode == "year")
+{
+    <div class="toolbar">
+        <button class="secondary" @onclick="() => ShiftYear(-1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /></button>
+        <select value="@_yearViewYear" @onchange="OnYearChanged" style="width: auto;">
+            @for (int y = DateTime.Today.Year - 2; y <= DateTime.Today.Year + 1; y++)
+            {
+                <option value="@y">@y</option>
+            }
+        </select>
+        <button class="secondary" @onclick="() => ShiftYear(1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(-90deg);" /></button>
+    </div>
+
+    @if (_yearLoading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else
+    {
+        <div class="calc-panel" style="margin-bottom: 16px;">
+            <div class="calc-row total"><span>Total leave in @_yearViewYear</span><span class="val">@_yearRecords.Sum(r => r.DaysCount) day(s)</span></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+            @for (int m = 1; m <= 12; m++)
+            {
+                var monthDate = new DateOnly(_yearViewYear, m, 1);
+                var daysInMonth = DateTime.DaysInMonth(_yearViewYear, m);
+                var leadingBlanks = (int)monthDate.DayOfWeek;
+                <div>
+                    <div class="stat-sub" style="font-weight: 600; margin-bottom: 4px;">@monthDate.ToString("MMMM")</div>
+                    <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-size: 10.5px;">
+                        @for (int i = 0; i < leadingBlanks; i++)
+                        {
+                            <div></div>
+                        }
+                        @for (int d = 1; d <= daysInMonth; d++)
+                        {
+                            var day = new DateOnly(_yearViewYear, m, d);
+                            var dayRecords = _yearRecords.Where(r => day >= r.StartDate && day <= r.EndDate).ToList();
+                            <div @onclick="() => OpenDayDetail(day, dayRecords)"
+                                 style='padding: 3px 0; border-radius: 3px; cursor: pointer; @(dayRecords.Count > 0 ? "background: var(--danger-soft); color: var(--danger); font-weight: 700;" : "")'>
+                                @d
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+else
+{
+    <div class="toolbar">
+        <select value="@_employeeViewStaffId" @onchange="OnEmployeeChanged" style="width: auto;">
+            <option value="">— Select staff member —</option>
+            @foreach (var s in _activeStaff)
+            {
+                <option value="@s.Id">@s.DisplayName (@s.StaffCode)</option>
+            }
+        </select>
+        <div class="filter-tabs">
+            <button class="filter-tab @(_employeeRangeMode == "month" ? "active" : "")" @onclick='() => SwitchEmployeeRangeMode("month")'>Month</button>
+            <button class="filter-tab @(_employeeRangeMode == "year" ? "active" : "")" @onclick='() => SwitchEmployeeRangeMode("year")'>Whole year</button>
+        </div>
+        @if (_employeeRangeMode == "month")
+        {
+            <button class="secondary" @onclick="() => ShiftEmployeeMonth(-1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /></button>
+            <MonthYearPicker Value="@_employeeViewMonth" ValueChanged="OnEmployeeMonthChanged" />
+            <button class="secondary" @onclick="() => ShiftEmployeeMonth(1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(-90deg);" /></button>
+        }
+        else
+        {
+            <button class="secondary" @onclick="() => ShiftEmployeeYear(-1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(90deg);" /></button>
+            <select value="@_employeeViewYear" @onchange="OnEmployeeYearChanged" style="width: auto;">
+                @for (int y = DateTime.Today.Year - 2; y <= DateTime.Today.Year + 1; y++)
+                {
+                    <option value="@y">@y</option>
+                }
+            </select>
+            <button class="secondary" @onclick="() => ShiftEmployeeYear(1)"><Icon Name="chevron-down" Size="14" Style="transform: rotate(-90deg);" /></button>
+        }
+    </div>
+
+    @if (string.IsNullOrEmpty(_employeeViewStaffId))
+    {
+        <div class="empty-state">
+            <div class="icon"><Icon Name="user" Size="36" /></div>
+            <p>Pick a staff member to see their leave at a glance.</p>
+        </div>
+    }
+    else if (_employeeLoading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else if (_employeeRangeMode == "month")
+    {
+        <div class="calc-panel" style="margin-bottom: 16px;">
+            <div class="calc-row total"><span>Total leave in @EmployeeSelectedMonthName</span><span class="val">@_employeeMonthRecords.Sum(r => r.DaysCount) day(s)</span></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; max-width: 420px;">
+            @foreach (var dow in new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" })
+            {
+                <div class="stat-sub" style="font-weight: 600; padding: 4px;">@dow</div>
+            }
+            @for (int i = 0; i < EmployeeMonthLeadingBlanks; i++)
+            {
+                <div></div>
+            }
+            @foreach (var day in EmployeeMonthDays)
+            {
+                var dayRecord = _employeeMonthRecords.FirstOrDefault(r => day >= r.StartDate && day <= r.EndDate);
+                var isToday = day == DateOnly.FromDateTime(DateTime.Today);
+                var dayTitle = dayRecord == null ? null
+                    : string.IsNullOrWhiteSpace(dayRecord.Reason)
+                        ? $"On leave ({dayRecord.DaysCount} day(s) from {dayRecord.StartDate:dd MMM})"
+                        : $"On leave — {dayRecord.Reason} ({dayRecord.DaysCount} day(s) from {dayRecord.StartDate:dd MMM})";
+                <div title="@dayTitle"
+                     style='padding: 8px 4px; border-radius: var(--radius-sm); @(dayRecord != null ? "background: var(--danger-soft); color: var(--danger); font-weight: 600;" : "background: var(--bg-surface-alt);") @(isToday ? "outline: 2px solid var(--accent); outline-offset: -2px;" : "")'>
+                    @day.Day
+                </div>
+            }
+        </div>
+        <div class="stat-sub" style="margin-top: 10px;">Highlighted days indicate leave. Hover a highlighted day to see details.</div>
+    }
+    else
+    {
+        <div class="calc-panel" style="margin-bottom: 16px;">
+            <div class="calc-row total"><span>Total leave in @_employeeViewYear</span><span class="val">@_employeeYearRecords.Sum(r => r.DaysCount) day(s)</span></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+            @for (int m = 1; m <= 12; m++)
+            {
+                var monthDate = new DateOnly(_employeeViewYear, m, 1);
+                var daysInMonth = DateTime.DaysInMonth(_employeeViewYear, m);
+                var leadingBlanks = (int)monthDate.DayOfWeek;
+                <div>
+                    <div class="stat-sub" style="font-weight: 600; margin-bottom: 4px;">@monthDate.ToString("MMMM")</div>
+                    <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-size: 10.5px;">
+                        @for (int i = 0; i < leadingBlanks; i++)
+                        {
+                            <div></div>
+                        }
+                        @for (int d = 1; d <= daysInMonth; d++)
+                        {
+                            var day = new DateOnly(_employeeViewYear, m, d);
+                            var yearDayRecord = _employeeYearRecords.FirstOrDefault(r => day >= r.StartDate && day <= r.EndDate);
+                            var yearDayTitle = yearDayRecord == null ? null
+                                : string.IsNullOrWhiteSpace(yearDayRecord.Reason)
+                                    ? $"On leave ({yearDayRecord.DaysCount} day(s) from {yearDayRecord.StartDate:dd MMM})"
+                                    : $"On leave — {yearDayRecord.Reason} ({yearDayRecord.DaysCount} day(s) from {yearDayRecord.StartDate:dd MMM})";
+                            <div title="@yearDayTitle" style='padding: 3px 0; border-radius: 3px; @(yearDayRecord != null ? "background: var(--danger-soft); color: var(--danger); font-weight: 700;" : "")'>@d</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@if (_showFormDialog)
+{
+    <div class="modal-backdrop" @onclick="() => _showFormDialog = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>
+                @if (_editingId == null)
+                {
+                    <text>Add leave record</text>
+                }
+                else
+                {
+                    <text>@_editingStaffName</text>
+                    <span class="stat-sub" style="font-weight: 400; margin-left: 6px;">@_editingStaffCode</span>
+                }
+            </h2>
+
+            @if (_editingId == null)
+            {
+                <div class="form-row">
+                    <label>Paste from WhatsApp (optional)</label>
+                    <textarea rows="3" @bind="_pasteText" @bind:event="oninput" placeholder="Paste the leave notification message here, then click Parse — it'll fill in the fields below for you to check."></textarea>
+                    <button class="secondary" style="margin-top: 6px;" @onclick="ParsePastedMessage" disabled="@(string.IsNullOrWhiteSpace(_pasteText))">
+                        <Icon Name="check" Size="14" /> Parse & fill form
+                    </button>
+                    @if (_parseAttempted)
+                    {
+                        @if (_parsedStaffCandidates.Count == 0)
+                        {
+                            <div class="alert warning" style="margin-top: 8px;">
+                                Couldn't confidently match a staff name@(string.IsNullOrEmpty(_parsedNameText) ? "" : $" from \"{_parsedNameText}\"") — pick the right person manually below.
+                            </div>
+                        }
+                        else if (_parsedStaffCandidates.Count > 1)
+                        {
+                            <div class="alert warning" style="margin-top: 8px;">
+                                Matched "@_parsedNameText" to more than one person — double-check the selection below is the right one.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="stat-sub" style="margin-top: 6px;">Matched "@_parsedNameText" to @_parsedStaffCandidates[0].DisplayName — check the fields below before saving.</div>
+                        }
+                    }
+                </div>
+                <div style="border-top: 1px solid var(--border); margin: 4px 0 14px;"></div>
+
+                <div class="form-row">
+                    <label>Staff member *</label>
+                    <select @bind="_formStaffId">
+                        <option value="">— Select —</option>
+                        @foreach (var s in _activeStaff)
+                        {
+                            <option value="@s.Id">@s.DisplayName (@s.StaffCode)</option>
+                        }
+                    </select>
+                </div>
+            }
+
+            <div class="form-grid">
+                <div class="form-row">
+                    <label>Start date *</label>
+                    <input type="date" @bind="_formStartDate" @bind:after="OnStartDateChanged" />
+                </div>
+                <div class="form-row">
+                    <label>End date *</label>
+                    <input type="date" @bind="_formEndDate" @bind:after="OnEndDateChanged" />
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Number of days *</label>
+                <input type="number" min="0.5" step="0.5" @bind="_formDaysCount" @bind:after="OnDaysCountChanged" style="max-width: 140px;" />
+                <div class="stat-sub" style="margin-top: 4px;">Auto-filled from the date range — adjust if it should exclude a holiday or weekend.</div>
+            </div>
+
+            <div class="form-row">
+                <label>Reason (optional)</label>
+                <input type="text" @bind="_formReason" maxlength="200" placeholder="e.g. Family function, Medical" />
+            </div>
+
+            <div class="form-row">
+                <label>Substitute arrangement (optional)</label>
+                <textarea rows="5" @bind="_formSubstituteNotes" maxlength="1000"
+                          placeholder="e.g.&#10;2nd Period: Anupriya miss&#10;4th Period: Gayathri miss&#10;Office Alternative: C. Abhinaya miss"></textarea>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_formError))
+            {
+                <div class="alert danger">@_formError</div>
+            }
+
+            <div class="modal-actions" style="justify-content: @(_editingId != null ? "space-between" : "flex-end");">
+                @if (_editingId != null)
+                {
+                    <button class="danger" @onclick="DeleteFromEditDialog">
+                        <Icon Name="trash-2" Size="14" /> Delete
+                    </button>
+                }
+                <div style="display: flex; gap: 10px;">
+                    <button class="secondary" @onclick="() => _showFormDialog = false">Cancel</button>
+                    <button class="primary" @onclick="SaveAsync" disabled="@_saving">
+                        @(_saving ? "Saving…" : "Save")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_deletingRecord != null)
+{
+    <div class="modal-backdrop" @onclick="() => _deletingRecord = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Delete this leave record?</h2>
+            <div class="modal-body">
+                @_deletingRecord.StaffDisplayName — @_deletingRecord.DaysCount day(s) from @_deletingRecord.StartDate.ToString("dd MMM yyyy"). This cannot be undone.
+            </div>
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _deletingRecord = null">Cancel</button>
+                <button class="danger" @onclick="ConfirmDeleteAsync">Delete</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_dayDetailDate != null)
+{
+    <div class="modal-backdrop" @onclick="() => _dayDetailDate = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>@_dayDetailDate.Value.ToString("dddd, dd MMMM yyyy")</h2>
+            @if (_dayDetailRecords.Count == 0)
+            {
+                <p class="stat-sub">Nobody on leave this day.</p>
+            }
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                @foreach (var r in _dayDetailRecords)
+                {
+                    var (accent, bg, fg) = ChipColorFor(r.StaffId);
+                    <div @onclick="() => SelectDayDetailRecord(r)"
+                         style="background: @bg; color: @fg; border-left: 3px solid @accent; border-radius: 3px; padding: 8px 10px; cursor: pointer;">
+                        <div style="font-weight: 600;">@r.StaffDisplayName <span class="stat-sub" style="color: inherit; opacity: 0.75;">@r.StaffCode · @r.Designation</span></div>
+                        @if (!string.IsNullOrWhiteSpace(r.Reason))
+                        {
+                            <div style="font-size: 12.5px;">@r.Reason</div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _dayDetailDate = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _viewMode = "week";
+    private List<Staff> _activeStaff = new();
+    private Dictionary<Guid, int> _staffColorIndex = new();
+
+    // ---- Week view ----
+    private DateOnly _weekStart = StartOfWeek(DateOnly.FromDateTime(DateTime.Today));
+    private DateTime _weekPickerDate = DateTime.Today;
+    private List<LeaveRecord> _weekRecords = new();
+    private bool _weekLoading;
+
+    private IEnumerable<DateOnly> WeekDays => Enumerable.Range(0, 7).Select(i => _weekStart.AddDays(i));
+
+    private static DateOnly StartOfWeek(DateOnly date)
+    {
+        var diff = (7 + (int)date.DayOfWeek - (int)DayOfWeek.Monday) % 7;
+        return date.AddDays(-diff);
+    }
+
+    // ---- Month view (all staff) ----
+    private string _selectedMonth = DateTime.Today.ToString("yyyy-MM");
+    private DateTime _monthPickerDate = DateTime.Today;
+    private string _staffFilter = "";
+    private string _monthViewStyle = "calendar";
+    private List<LeaveRecord> _monthRecords = new();
+    private bool _monthLoading;
+
+    private string MonthViewSelectedMonthName
+    {
+        get
+        {
+            var parsed = DateOnly.TryParse(_selectedMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+            return parsed.ToString("MMMM");
+        }
+    }
+
+    // ---- Year view (all staff) ----
+    private int _yearViewYear = DateTime.Today.Year;
+    private List<LeaveRecord> _yearRecords = new();
+    private bool _yearLoading;
+
+    // ---- Employee month/year view ----
+    private string _employeeViewStaffId = "";
+    private string _employeeRangeMode = "month";
+    private string _employeeViewMonth = DateTime.Today.ToString("yyyy-MM");
+    private int _employeeViewYear = DateTime.Today.Year;
+    private List<LeaveRecord> _employeeMonthRecords = new();
+    private List<LeaveRecord> _employeeYearRecords = new();
+    private bool _employeeLoading;
+
+    private string EmployeeSelectedMonthName
+    {
+        get
+        {
+            var parsed = DateOnly.TryParse(_employeeViewMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+            return parsed.ToString("MMMM");
+        }
+    }
+
+    private int EmployeeMonthLeadingBlanks
+    {
+        get
+        {
+            var parsed = DateOnly.TryParse(_employeeViewMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+            return (int)parsed.DayOfWeek;
+        }
+    }
+
+    private IEnumerable<DateOnly> EmployeeMonthDays
+    {
+        get
+        {
+            var parsed = DateOnly.TryParse(_employeeViewMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+            var days = DateTime.DaysInMonth(parsed.Year, parsed.Month);
+            return Enumerable.Range(1, days).Select(i => new DateOnly(parsed.Year, parsed.Month, i));
+        }
+    }
+
+    // ---- Day detail popup (shared by Month and Year views) ----
+    private DateOnly? _dayDetailDate;
+    private List<LeaveRecord> _dayDetailRecords = new();
+
+    // ---- Shared add/edit form ----
+    private bool _showFormDialog;
+    private Guid? _editingId;
+    private string _formStaffId = "";
+    private DateTime _formStartDate = DateTime.Today;
+    private DateTime _formEndDate = DateTime.Today;
+    private decimal _formDaysCount = 1;
+    private string _formReason = "";
+    private string _formSubstituteNotes = "";
+    private bool _saving;
+    private string? _formError;
+    private LeaveRecord? _deletingRecord;
+    private LeaveRecord? _editingOriginalRecord;
+    private string _editingStaffName = "";
+    private string _editingStaffCode = "";
+
+    private string _pasteText = "";
+    private bool _parseAttempted;
+    private string? _parsedNameText;
+    private List<Staff> _parsedStaffCandidates = new();
+
+    // ---- Color system: unique per staff member, generated via the golden
+    // angle so colors stay well-separated regardless of staff count ----
+    private (string Accent, string Bg, string Fg) ChipColorFor(Guid staffId)
+    {
+        var index = _staffColorIndex.TryGetValue(staffId, out var i) ? i : 0;
+        var hue = (index * 137.508) % 360.0;
+        return (HslToHex(hue, 0.62, 0.42), HslToHex(hue, 0.55, 0.93), HslToHex(hue, 0.55, 0.28));
+    }
+
+    private static string HslToHex(double h, double s, double l)
+    {
+        double C = (1 - Math.Abs(2 * l - 1)) * s;
+        double X = C * (1 - Math.Abs((h / 60.0 % 2) - 1));
+        double m = l - C / 2;
+        double r = 0, g = 0, b = 0;
+        if (h < 60) { r = C; g = X; b = 0; }
+        else if (h < 120) { r = X; g = C; b = 0; }
+        else if (h < 180) { r = 0; g = C; b = X; }
+        else if (h < 240) { r = 0; g = X; b = C; }
+        else if (h < 300) { r = X; g = 0; b = C; }
+        else { r = C; g = 0; b = X; }
+        int ri = (int)Math.Round((r + m) * 255);
+        int gi = (int)Math.Round((g + m) * 255);
+        int bi = (int)Math.Round((b + m) * 255);
+        return $"#{ri:X2}{gi:X2}{bi:X2}";
+    }
+
+    private static string Initials(string displayName)
+    {
+        var parts = displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        if (parts.Length == 1) return parts[0][..Math.Min(2, parts[0].Length)].ToUpperInvariant();
+        return $"{parts[0][0]}{parts[^1][0]}".ToUpperInvariant();
+    }
+
+    private string? GetStaffPhotoPath(Guid staffId) =>
+        _activeStaff.FirstOrDefault(s => s.Id == staffId)?.PhotoRelativePath;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _activeStaff = (await StaffService.ListActiveAsync()).OrderBy(s => s.DisplayName).ToList();
+        _staffColorIndex = _activeStaff.Select((s, i) => (s.Id, i)).ToDictionary(x => x.Id, x => x.i);
+        await ReloadCurrentViewAsync();
+    }
+
+    private async Task SwitchView(string mode)
+    {
+        _viewMode = mode;
+        await ReloadCurrentViewAsync();
+    }
+
+    private async Task ReloadCurrentViewAsync()
+    {
+        switch (_viewMode)
+        {
+            case "week": await ReloadWeekAsync(); break;
+            case "month": await ReloadMonthAsync(); break;
+            case "year": await ReloadYearAsync(); break;
+            default: await ReloadEmployeeAsync(); break;
+        }
+    }
+
+    // ---- Week view logic ----
+    private async Task ReloadWeekAsync()
+    {
+        _weekLoading = true;
+        _weekRecords = await LeaveService.ListInRangeAsync(_weekStart, _weekStart.AddDays(6));
+        _weekLoading = false;
+    }
+
+    private async Task ShiftWeek(int days)
+    {
+        _weekStart = _weekStart.AddDays(days);
+        _weekPickerDate = _weekStart.ToDateTime(TimeOnly.MinValue);
+        await ReloadWeekAsync();
+    }
+
+    private async Task ResetToThisWeek()
+    {
+        _weekStart = StartOfWeek(DateOnly.FromDateTime(DateTime.Today));
+        _weekPickerDate = DateTime.Today;
+        await ReloadWeekAsync();
+    }
+
+    private async Task OnWeekDatePicked(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var picked))
+        {
+            _weekPickerDate = picked;
+            _weekStart = StartOfWeek(DateOnly.FromDateTime(picked));
+            await ReloadWeekAsync();
+        }
+    }
+
+    // ---- Month view logic ----
+    private async Task ReloadMonthAsync()
+    {
+        _monthLoading = true;
+        var parsed = DateOnly.TryParse(_selectedMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+        Guid? staffId = Guid.TryParse(_staffFilter, out var sid) ? sid : null;
+        _monthRecords = await LeaveService.ListAsync(parsed.Year, parsed.Month, staffId);
+        _monthLoading = false;
+    }
+
+    private async Task ShiftSelectedMonth(int delta)
+    {
+        var parsed = DateOnly.TryParse(_selectedMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+        var shifted = parsed.AddMonths(delta);
+        _selectedMonth = shifted.ToString("yyyy-MM");
+        _monthPickerDate = shifted.ToDateTime(TimeOnly.MinValue);
+        await ReloadMonthAsync();
+    }
+
+    private async Task OnMonthDatePicked(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var picked))
+        {
+            _monthPickerDate = picked;
+            _selectedMonth = picked.ToString("yyyy-MM");
+            await ReloadMonthAsync();
+        }
+    }
+
+    private async Task OnStaffFilterChanged(ChangeEventArgs e)
+    {
+        _staffFilter = e.Value?.ToString() ?? "";
+        await ReloadMonthAsync();
+    }
+
+    // ---- Year view logic ----
+    private async Task ReloadYearAsync()
+    {
+        _yearLoading = true;
+        var yearStart = new DateOnly(_yearViewYear, 1, 1);
+        var yearEnd = new DateOnly(_yearViewYear, 12, 31);
+        _yearRecords = await LeaveService.ListInRangeAsync(yearStart, yearEnd);
+        _yearLoading = false;
+    }
+
+    private async Task ShiftYear(int delta)
+    {
+        _yearViewYear += delta;
+        await ReloadYearAsync();
+    }
+
+    private async Task OnYearChanged(ChangeEventArgs e)
+    {
+        _yearViewYear = int.TryParse(e.Value?.ToString(), out var y) ? y : DateTime.Today.Year;
+        await ReloadYearAsync();
+    }
+
+    // ---- Employee month/year view logic ----
+    private async Task OnEmployeeChanged(ChangeEventArgs e)
+    {
+        _employeeViewStaffId = e.Value?.ToString() ?? "";
+        await ReloadEmployeeAsync();
+    }
+
+    private async Task SwitchEmployeeRangeMode(string mode)
+    {
+        _employeeRangeMode = mode;
+        await ReloadEmployeeAsync();
+    }
+
+    private async Task OnEmployeeMonthChanged(string v)
+    {
+        _employeeViewMonth = v;
+        await ReloadEmployeeAsync();
+    }
+
+    private async Task ShiftEmployeeMonth(int delta)
+    {
+        var parsed = DateOnly.TryParse(_employeeViewMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+        _employeeViewMonth = parsed.AddMonths(delta).ToString("yyyy-MM");
+        await ReloadEmployeeAsync();
+    }
+
+    private async Task OnEmployeeYearChanged(ChangeEventArgs e)
+    {
+        _employeeViewYear = int.TryParse(e.Value?.ToString(), out var y) ? y : DateTime.Today.Year;
+        await ReloadEmployeeAsync();
+    }
+
+    private async Task ShiftEmployeeYear(int delta)
+    {
+        _employeeViewYear += delta;
+        await ReloadEmployeeAsync();
+    }
+
+    private async Task ReloadEmployeeAsync()
+    {
+        if (_employeeRangeMode == "year") await ReloadEmployeeYearAsync();
+        else await ReloadEmployeeMonthAsync();
+    }
+
+    private async Task ReloadEmployeeMonthAsync()
+    {
+        if (string.IsNullOrEmpty(_employeeViewStaffId) || !Guid.TryParse(_employeeViewStaffId, out var staffId))
+        {
+            _employeeMonthRecords = new();
+            return;
+        }
+
+        _employeeLoading = true;
+        var parsed = DateOnly.TryParse(_employeeViewMonth + "-01", out var d) ? d : DateOnly.FromDateTime(DateTime.Today);
+        var monthEnd = parsed.AddMonths(1).AddDays(-1);
+        var all = await LeaveService.ListInRangeAsync(parsed, monthEnd);
+        _employeeMonthRecords = all.Where(r => r.StaffId == staffId).ToList();
+        _employeeLoading = false;
+    }
+
+    private async Task ReloadEmployeeYearAsync()
+    {
+        if (string.IsNullOrEmpty(_employeeViewStaffId) || !Guid.TryParse(_employeeViewStaffId, out var staffId))
+        {
+            _employeeYearRecords = new();
+            return;
+        }
+
+        _employeeLoading = true;
+        var yearStart = new DateOnly(_employeeViewYear, 1, 1);
+        var yearEnd = new DateOnly(_employeeViewYear, 12, 31);
+        var all = await LeaveService.ListInRangeAsync(yearStart, yearEnd);
+        _employeeYearRecords = all.Where(r => r.StaffId == staffId).ToList();
+        _employeeLoading = false;
+    }
+
+    // ---- Day detail popup ----
+    private void OpenDayDetail(DateOnly day, List<LeaveRecord> records)
+    {
+        _dayDetailDate = day;
+        _dayDetailRecords = records;
+    }
+
+    private void SelectDayDetailRecord(LeaveRecord r)
+    {
+        _dayDetailDate = null;
+        OpenEditDialog(r);
+    }
+
+    // ---- Shared add/edit/delete logic ----
+
+    // Changing the start date always resets the end date to match it —
+    // defaults to a single-day leave, which is the common case. Multi-day
+    // leaves are then set explicitly via the end date field afterward.
+    private void OnStartDateChanged()
+    {
+        _formEndDate = _formStartDate;
+        RecomputeDaysCount();
+    }
+
+    // Changing the end date only validates against the start date and
+    // recomputes the day count — it never touches the start date.
+    private void OnEndDateChanged()
+    {
+        if (_formEndDate < _formStartDate) _formEndDate = _formStartDate;
+        RecomputeDaysCount();
+    }
+
+    private void RecomputeDaysCount()
+    {
+        _formDaysCount = (decimal)(_formEndDate.Date - _formStartDate.Date).TotalDays + 1;
+    }
+
+    // Reverse direction: typing a Days value directly moves the End Date
+    // to match, rather than only dates driving the day count. A fractional
+    // value (e.g. 2.5) rounds up to the number of calendar days it spans.
+    private void OnDaysCountChanged()
+    {
+        if (_formDaysCount < 0.5m) _formDaysCount = 0.5m;
+        var spanDays = (int)Math.Ceiling(_formDaysCount) - 1;
+        _formEndDate = _formStartDate.AddDays(spanDays);
+    }
+
+    private void OpenAddDialog()
+    {
+        _editingId = null;
+        _formStaffId = "";
+        _formStartDate = DateTime.Today;
+        _formEndDate = DateTime.Today;
+        _formDaysCount = 1;
+        _formReason = "";
+        _formSubstituteNotes = "";
+        _formError = null;
+        _pasteText = "";
+        _parseAttempted = false;
+        _parsedNameText = null;
+        _parsedStaffCandidates = new();
+        _showFormDialog = true;
+    }
+
+    private void ParsePastedMessage()
+    {
+        var parsed = WhatsAppLeaveParser.Parse(_pasteText, _activeStaff);
+        _parseAttempted = true;
+        _parsedNameText = parsed.ExtractedNameText;
+        _parsedStaffCandidates = parsed.MatchedStaffCandidates;
+
+        if (parsed.MatchedStaffCandidates.Count > 0)
+            _formStaffId = parsed.MatchedStaffCandidates[0].Id.ToString();
+
+        if (parsed.Date.HasValue)
+        {
+            _formStartDate = parsed.Date.Value.ToDateTime(TimeOnly.MinValue);
+            _formEndDate = parsed.Date.Value.ToDateTime(TimeOnly.MinValue);
+        }
+
+        if (parsed.Days.HasValue)
+            _formDaysCount = parsed.Days.Value;
+        else
+            RecomputeDaysCount();
+
+        if (!string.IsNullOrWhiteSpace(parsed.Reason))
+            _formReason = parsed.Reason;
+
+        if (!string.IsNullOrWhiteSpace(parsed.SubstituteNotes))
+            _formSubstituteNotes = parsed.SubstituteNotes;
+    }
+
+    private void OpenEditDialog(LeaveRecord r)
+    {
+        _editingId = r.Id;
+        _formStaffId = r.StaffId.ToString();
+        _formStartDate = r.StartDate.ToDateTime(TimeOnly.MinValue);
+        _formEndDate = r.EndDate.ToDateTime(TimeOnly.MinValue);
+        _formDaysCount = r.DaysCount;
+        _formReason = r.Reason ?? "";
+        _formSubstituteNotes = r.SubstituteArrangementNotes ?? "";
+        _formError = null;
+        _editingStaffName = r.StaffDisplayName;
+        _editingStaffCode = r.StaffCode;
+        _editingOriginalRecord = r;
+        _showFormDialog = true;
+    }
+
+    private void DeleteFromEditDialog()
+    {
+        _showFormDialog = false;
+        if (_editingOriginalRecord != null)
+            OpenDeleteConfirm(_editingOriginalRecord);
+    }
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (_editingId == null && !Guid.TryParse(_formStaffId, out _))
+        {
+            _formError = "Select a staff member.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var record = new LeaveRecord
+            {
+                Id = _editingId ?? Guid.Empty,
+                StaffId = Guid.TryParse(_formStaffId, out var sid) ? sid : Guid.Empty,
+                StartDate = DateOnly.FromDateTime(_formStartDate),
+                EndDate = DateOnly.FromDateTime(_formEndDate),
+                DaysCount = _formDaysCount,
+                Reason = string.IsNullOrWhiteSpace(_formReason) ? null : _formReason,
+                SubstituteArrangementNotes = string.IsNullOrWhiteSpace(_formSubstituteNotes) ? null : _formSubstituteNotes
+            };
+
+            if (_editingId == null)
+                await LeaveService.CreateAsync(record);
+            else
+                await LeaveService.UpdateAsync(record);
+
+            _showFormDialog = false;
+            await ReloadCurrentViewAsync();
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.InnerException != null ? $"{ex.Message} — {ex.InnerException.Message}" : ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void OpenDeleteConfirm(LeaveRecord r) => _deletingRecord = r;
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deletingRecord == null) return;
+        await LeaveService.DeleteAsync(_deletingRecord.Id);
+        _deletingRecord = null;
+        await ReloadCurrentViewAsync();
+    }
+}

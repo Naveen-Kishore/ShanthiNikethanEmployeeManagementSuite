@@ -1,0 +1,25 @@
+@inject IJSRuntime JS
+
+<button class="theme-toggle" @onclick="Cycle" title="Toggle theme">
+    <Icon Name="@_iconName" />
+</button>
+
+@code {
+    private string _current = "light";
+    private string _iconName => _current switch { "dark" => "sun", "beige" => "moon", _ => "coffee" };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _current = await JS.InvokeAsync<string>("theme.get");
+            StateHasChanged();
+        }
+    }
+
+    private async Task Cycle()
+    {
+        _current = _current switch { "light" => "beige", "beige" => "dark", _ => "light" };
+        await JS.InvokeVoidAsync("theme.set", _current);
+    }
+}

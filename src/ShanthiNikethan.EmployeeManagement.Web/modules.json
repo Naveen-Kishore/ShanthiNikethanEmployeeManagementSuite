@@ -1,0 +1,32 @@
+{
+  "Deployment": {
+    "LicenseTier": "Full"
+  },
+  "Modules": {
+    "StaffProfile": {
+      "Enabled": true,
+      "LicenseTier": "Base",
+      "Description": "Staff master records with soft delete, photo, statutory IDs, banking, salary structure."
+    },
+    "Attendance": {
+      "Enabled": true,
+      "LicenseTier": "Standard",
+      "Description": "Daily presence marking with a same-day-only edit lock, auto-filled from approved Leave records, plus a monthly register view."
+    },
+    "Leave": {
+      "Enabled": true,
+      "LicenseTier": "Standard",
+      "Description": "Leave records with substitute arrangements — a permanent, searchable replacement for the WhatsApp leave notification format."
+    },
+    "Payroll": {
+      "Enabled": true,
+      "LicenseTier": "Standard",
+      "Description": "Monthly payroll runs — draft, publish, and generate the IOB bank CSVs and wage statement PDF."
+    },
+    "Dashboard": {
+      "Enabled": true,
+      "LicenseTier": "Base",
+      "Description": "At-a-glance overview: staff composition, payroll cost trend, EPF/ESIC enrollment, leave activity, and recent changes across the system."
+    }
+  }
+}

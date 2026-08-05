@@ -1,0 +1,297 @@
+@page "/dashboard"
+@inject IDashboardService DashboardService
+@inject IJSRuntime JS
+@inject ICurrentUser CurrentUser
+@using System.Text.Json
+
+<h1>Dashboard</h1>
+
+@if (_loading)
+{
+    <p class="stat-sub">Loading…</p>
+}
+else if (_data != null)
+{
+    <div class="dash-kpi-row">
+        <div class="dash-kpi-card">
+            <div class="dash-kpi-icon dash-icon-blue"><Icon Name="users" Size="18" /></div>
+            <div class="dash-kpi-value">@_data.TotalActiveStaff</div>
+            <div class="dash-kpi-label">Active Staff</div>
+            <div class="stat-sub">@_data.TeachingCount Teaching · @_data.NonTeachingCount Non-Teaching</div>
+        </div>
+        <div class="dash-kpi-card">
+            <div class="dash-kpi-icon dash-icon-green"><Icon Name="check" Size="18" /></div>
+            <div class="dash-kpi-value">@_data.EpfEnrolledCount</div>
+            <div class="dash-kpi-label">EPF Enrolled</div>
+            <div class="stat-sub">of @_data.TotalActiveStaff active staff</div>
+        </div>
+        <div class="dash-kpi-card">
+            <div class="dash-kpi-icon dash-icon-teal"><Icon Name="briefcase" Size="18" /></div>
+            <div class="dash-kpi-value">@_data.EsicEnrolledCount</div>
+            <div class="dash-kpi-label">ESIC Enrolled</div>
+            <div class="stat-sub">of @_data.TotalActiveStaff active staff</div>
+        </div>
+        <div class="dash-kpi-card">
+            <div class="dash-kpi-icon dash-icon-purple"><Icon Name="file-text" Size="18" /></div>
+            @if (_data.LatestPayrollCost.HasValue)
+            {
+                <div class="dash-kpi-value">₹@_data.LatestPayrollCost.Value.ToString("N0")</div>
+                <div class="dash-kpi-label">Latest Payroll Cost</div>
+                <div class="stat-sub">@_data.LatestPayrollMonth</div>
+            }
+            else
+            {
+                <div class="dash-kpi-value">—</div>
+                <div class="dash-kpi-label">Latest Payroll Cost</div>
+                <div class="stat-sub">No published run yet</div>
+            }
+        </div>
+        <div class="dash-kpi-card">
+            <div class="dash-kpi-icon dash-icon-orange"><Icon Name="calendar" Size="18" /></div>
+            <div class="dash-kpi-value">@_data.StaffOnLeaveToday</div>
+            <div class="dash-kpi-label">On Leave Today</div>
+            <div class="stat-sub">@_data.LeaveDaysThisMonth day(s) taken this month</div>
+        </div>
+    </div>
+    <p class="stat-sub" style="margin-top: -10px; margin-bottom: 18px;">@GreetingLine</p>
+
+    <div class="dash-grid">
+        <div class="dash-panel">
+            <h3>Staff Composition</h3>
+            @if (_data.TotalActiveStaff > 0)
+            {
+                <canvas id="chart-composition" style="max-height: 240px;"></canvas>
+            }
+            else
+            {
+                <p class="stat-sub">No active staff yet.</p>
+            }
+        </div>
+
+        <div class="dash-panel">
+            <h3>EPF &amp; ESIC Enrollment</h3>
+            @if (_data.TotalActiveStaff > 0)
+            {
+                <canvas id="chart-enrollment" style="max-height: 240px;"></canvas>
+            }
+            else
+            {
+                <p class="stat-sub">No active staff yet.</p>
+            }
+        </div>
+
+        <div class="dash-panel" style="grid-column: span 2;">
+            <h3>Payroll Cost Trend</h3>
+            @if (_data.PayrollTrend.Count > 0)
+            {
+                <canvas id="chart-trend" style="max-height: 260px;"></canvas>
+                @if (_data.PayrollTrend.Count == 1)
+                {
+                    <p class="stat-sub" style="margin-top: 10px;">This trend gets more useful as more months are published.</p>
+                }
+            }
+            else
+            {
+                <div class="empty-state">
+                    <div class="icon"><Icon Name="chart-bar" Size="36" /></div>
+                    <p>No published payroll runs yet — publish one from the Payroll module to see cost trends here.</p>
+                </div>
+            }
+        </div>
+
+        @if (_data.SubDesignationBreakdown.Count > 0)
+        {
+            <div class="dash-panel">
+                <h3>Sub-Designations</h3>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    @foreach (var (sub, count) in _data.SubDesignationBreakdown)
+                    {
+                        var pct = _data.TotalActiveStaff > 0 ? (double)count / _data.TotalActiveStaff * 100 : 0;
+                        <div>
+                            <div style="display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 3px;">
+                                <span>@sub</span>
+                                <span class="stat-sub">@count</span>
+                            </div>
+                            <div style="background: var(--bg-surface-alt); border-radius: 4px; height: 6px; overflow: hidden;">
+                                <div style="width: @(pct.ToString("0"))%; background: var(--accent); height: 100%;"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <div class="dash-panel">
+            <h3>Recent Activity</h3>
+            @if (_data.RecentActivity.Count == 0)
+            {
+                <p class="stat-sub">No activity recorded yet.</p>
+            }
+            else
+            {
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    @foreach (var entry in _data.RecentActivity)
+                    {
+                        <div style="border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+                            <div style="font-size: 12.5px;">
+                                <strong>@entry.ActorDisplayName</strong> @DescribeAction(entry)
+                            </div>
+                            <div class="stat-sub">@entry.OccurredAtUtc.ToLocalTime().ToString("dd MMM yyyy, h:mm tt")</div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="page-header" style="margin-top: 24px;">
+        <a href="/staff" class="secondary" style="text-decoration: none;">
+            <button class="secondary"><Icon Name="users" Size="14" /> Staff Directory</button>
+        </a>
+        <a href="/payroll" style="text-decoration: none;">
+            <button class="secondary"><Icon Name="file-text" Size="14" /> Payroll</button>
+        </a>
+        <a href="/leave" style="text-decoration: none;">
+            <button class="secondary"><Icon Name="calendar" Size="14" /> Leave Management</button>
+        </a>
+    </div>
+}
+
+@code {
+    private DashboardData? _data;
+    private bool _loading = true;
+    private bool _chartsRendered;
+
+    private string GreetingLine
+    {
+        get
+        {
+            var hour = DateTime.Now.Hour;
+            var greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+            var name = string.IsNullOrWhiteSpace(CurrentUser.DisplayName) ? "" : $", {CurrentUser.DisplayName.Split(' ')[0]}";
+            return $"{greeting}{name} — here's how Shanthi Nikethan is looking on {DateTime.Today:dddd, dd MMMM yyyy}.";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _data = await DashboardService.GetDashboardDataAsync();
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _data != null && !_chartsRendered)
+        {
+            _chartsRendered = true;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data == null) return;
+
+        const string teachingColor = "#2266CC";
+        const string nonTeachingColor = "#D6720B";
+        const string enrolledColor = "#1E8E5A";
+        const string notEnrolledColor = "#D8DCE1";
+
+        if (_data.TotalActiveStaff > 0)
+        {
+            var compositionConfig = new
+            {
+                type = "doughnut",
+                data = new
+                {
+                    labels = new[] { "Teaching", "Non-Teaching" },
+                    datasets = new[]
+                    {
+                        new { data = new[] { _data.TeachingCount, _data.NonTeachingCount }, backgroundColor = new[] { teachingColor, nonTeachingColor }, borderWidth = 0 }
+                    }
+                },
+                options = new
+                {
+                    cutout = "65%",
+                    plugins = new { legend = new { position = "bottom" } }
+                }
+            };
+            await JS.InvokeVoidAsync("siteHelpers.renderChart", "chart-composition", JsonSerializer.Serialize(compositionConfig));
+
+            var enrollmentConfig = new
+            {
+                type = "bar",
+                data = new
+                {
+                    labels = new[] { "EPF", "ESIC" },
+                    datasets = new object[]
+                    {
+                        new { label = "Enrolled", data = new[] { _data.EpfEnrolledCount, _data.EsicEnrolledCount }, backgroundColor = enrolledColor },
+                        new { label = "Not enrolled", data = new[] { _data.TotalActiveStaff - _data.EpfEnrolledCount, _data.TotalActiveStaff - _data.EsicEnrolledCount }, backgroundColor = notEnrolledColor }
+                    }
+                },
+                options = new
+                {
+                    indexAxis = "y",
+                    scales = new
+                    {
+                        x = new { stacked = true },
+                        y = new { stacked = true }
+                    },
+                    plugins = new { legend = new { position = "bottom" } }
+                }
+            };
+            await JS.InvokeVoidAsync("siteHelpers.renderChart", "chart-enrollment", JsonSerializer.Serialize(enrollmentConfig));
+        }
+
+        if (_data.PayrollTrend.Count > 0)
+        {
+            var trendConfig = new
+            {
+                type = "bar",
+                data = new
+                {
+                    labels = _data.PayrollTrend.Select(p => p.MonthLabel).ToArray(),
+                    datasets = new object[]
+                    {
+                        new { label = "Teaching", data = _data.PayrollTrend.Select(p => p.TeachingCost).ToArray(), backgroundColor = teachingColor },
+                        new { label = "Non-Teaching", data = _data.PayrollTrend.Select(p => p.NonTeachingCost).ToArray(), backgroundColor = nonTeachingColor }
+                    }
+                },
+                options = new
+                {
+                    scales = new
+                    {
+                        x = new { stacked = true },
+                        y = new { stacked = true }
+                    },
+                    plugins = new { legend = new { position = "bottom" } }
+                }
+            };
+            await JS.InvokeVoidAsync("siteHelpers.renderChart", "chart-trend", JsonSerializer.Serialize(trendConfig));
+        }
+    }
+
+    private static string DescribeAction(AuditLogEntry entry)
+    {
+        var action = entry.Action.ToLowerInvariant();
+        var entityLabel = entry.EntityType switch
+        {
+            "PayrollRun" => "a payroll run",
+            "PayrollLineItem" => "a payroll amount",
+            "LeaveRecord" => "a leave record",
+            "Staff" => "a staff profile",
+            _ => entry.EntityType
+        };
+
+        return action switch
+        {
+            "create" => $"created {entityLabel}" + (string.IsNullOrEmpty(entry.Context) ? "" : $" ({entry.Context})"),
+            "update" => $"updated {entityLabel}" + (string.IsNullOrEmpty(entry.Context) ? "" : $" ({entry.Context})"),
+            "delete" => $"deleted {entityLabel}" + (string.IsNullOrEmpty(entry.Context) ? "" : $" ({entry.Context})"),
+            "publish" => $"published {entityLabel}" + (string.IsNullOrEmpty(entry.Context) ? "" : $" ({entry.Context})"),
+            "removestaff" => $"removed staff from {entityLabel}" + (string.IsNullOrEmpty(entry.Context) ? "" : $" — {entry.Context}"),
+            _ => $"{action} {entityLabel}"
+        };
+    }
+}

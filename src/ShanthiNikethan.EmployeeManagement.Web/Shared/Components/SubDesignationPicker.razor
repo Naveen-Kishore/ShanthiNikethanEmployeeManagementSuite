@@ -1,0 +1,67 @@
+@inject ISubDesignationService SubDesignationService
+
+<select value="@(Value ?? "")" @onchange="OnSelectChanged" disabled="@Disabled">
+    <option value="">— none —</option>
+    @foreach (var opt in _options)
+    {
+        <option value="@opt.Name">@opt.Name</option>
+    }
+    @if (!Disabled)
+    {
+        <option value="__add_new__">+ Add new…</option>
+    }
+</select>
+
+@if (_showAddNew)
+{
+    <div style="margin-top: 8px; display: flex; gap: 6px;">
+        <input type="text" @bind="_newName" @bind:event="oninput"
+               placeholder="e.g. Librarian" style="flex: 1;" />
+        <button type="button" class="secondary" @onclick="ConfirmAddNew">Add</button>
+        <button type="button" class="ghost" @onclick="() => _showAddNew = false">Cancel</button>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public StaffDesignation Category { get; set; }
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private List<SubDesignationOption> _options = new();
+    private StaffDesignation? _loadedFor;
+    private bool _showAddNew;
+    private string _newName = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor != Category)
+        {
+            _options = await SubDesignationService.ListAsync(Category);
+            _loadedFor = Category;
+        }
+    }
+
+    private async Task OnSelectChanged(ChangeEventArgs e)
+    {
+        var val = e.Value?.ToString();
+        if (val == "__add_new__")
+        {
+            _showAddNew = true;
+            return;
+        }
+        _showAddNew = false;
+        await ValueChanged.InvokeAsync(string.IsNullOrEmpty(val) ? null : val);
+    }
+
+    private async Task ConfirmAddNew()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        var created = await SubDesignationService.AddAsync(Category, _newName.Trim());
+        _options = await SubDesignationService.ListAsync(Category);
+        _showAddNew = false;
+        var newName = created.Name;
+        _newName = "";
+        await ValueChanged.InvokeAsync(newName);
+    }
+}

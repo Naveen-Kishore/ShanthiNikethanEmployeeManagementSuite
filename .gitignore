@@ -1,0 +1,55 @@
+# === Build outputs ===
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Rr]elease/
+[Rr]eleases/
+publish/
+
+# === Secrets — NEVER commit these ===
+appsettings.Development.json
+appsettings.Production.json
+appsettings.*.local.json
+*.pfx
+*.pem
+*.key
+secrets.json
+.env
+.env.*
+
+# === User-uploaded content (staff photos, passbook scans) ===
+# These stay on the server disk, not in the repo
+src/ShanthiNikethan.EmployeeManagement.Web/wwwroot/uploads/photos/*
+!src/ShanthiNikethan.EmployeeManagement.Web/wwwroot/uploads/photos/.gitkeep
+src/ShanthiNikethan.EmployeeManagement.Web/wwwroot/uploads/passbooks/*
+!src/ShanthiNikethan.EmployeeManagement.Web/wwwroot/uploads/passbooks/.gitkeep
+
+# === Visual Studio ===
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+_ReSharper*/
+
+# === Rider / VS Code ===
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# === NuGet / npm ===
+*.nupkg
+*.snupkg
+packages/
+node_modules/
+
+# === OS junk ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Logs ===
+*.log
+logs/

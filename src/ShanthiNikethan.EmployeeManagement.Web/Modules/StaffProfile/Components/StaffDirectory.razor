@@ -1,0 +1,339 @@
+@page "/staff"
+@inject IStaffProfileService StaffService
+@inject IConfiguration Config
+@inject StatutorySalaryCalculator Calculator
+
+<h1>Staff Directory</h1>
+
+<div class="page-header">
+    @if (_filterTab == "Active")
+    {
+        <div class="search-box">
+            <Icon Name="search" Size="16" />
+            <input type="text" placeholder="Search name, phone, account number…" autocomplete="off"
+                   @bind="_searchTerm" @bind:event="oninput" @bind:after="ReloadActiveAsync" />
+        </div>
+        @if (_selectedIds.Count > 0)
+        {
+            <span class="stat-sub">@_selectedIds.Count selected</span>
+        }
+        <button class="danger" @onclick="OpenBulkRemove" disabled="@(_selectedIds.Count == 0)">
+            <Icon Name="trash-2" Size="14" /> Delete staff
+        </button>
+        <button class="primary" @onclick="() => _showAddDialog = true">
+            <Icon Name="plus" Size="16" /> Add staff
+        </button>
+    }
+</div>
+
+<div class="filter-tabs" style="margin-bottom: 16px; width: fit-content;">
+    <button class="filter-tab @(_filterTab == "Active" ? "active" : "")" @onclick='() => SwitchTab("Active")'>
+        Active (@_activeStaff.Count)
+    </button>
+    <button class="filter-tab @(_filterTab == "Deleted" ? "active" : "")" @onclick='() => SwitchTab("Deleted")'>
+        Soft-deleted (@_softDeletedStaff.Count)
+    </button>
+</div>
+
+@if (_filterTab == "Active")
+{
+    <div class="toolbar">
+        <select value="@_designationFilter" @onchange="OnDesignationFilterChanged" style="width: auto;">
+            <option value="all">All designations</option>
+            <option value="Teaching">Teaching</option>
+            <option value="NonTeaching">Non-Teaching</option>
+        </select>
+        <select value="@_subDesignationFilter" @onchange="OnSubDesignationFilterChanged" style="width: auto;">
+            <option value="all">All sub-designations</option>
+            @foreach (var sd in _subDesignationOptions)
+            {
+                <option value="@sd">@sd</option>
+            }
+        </select>
+        <select value="@_epfFilter" @onchange="OnEpfFilterChanged" style="width: auto;">
+            <option value="all">All (EPF)</option>
+            <option value="enabled">EPF enrolled</option>
+            <option value="disabled">Not EPF enrolled</option>
+        </select>
+        <select value="@_esicFilter" @onchange="OnEsicFilterChanged" style="width: auto;">
+            <option value="all">All (ESIC)</option>
+            <option value="enabled">ESIC enrolled</option>
+            <option value="disabled">Not ESIC enrolled</option>
+        </select>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else if (_activeStaff.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="icon"><Icon Name="users" Size="36" /></div>
+            <p>@(string.IsNullOrWhiteSpace(_searchTerm) ? "No staff added yet." : "No matches for your search.")</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-scroll">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th style="width: 34px" class="checkbox-cell">
+                        <input type="checkbox" title="Select all" checked="@AllSelected" @onchange="ToggleSelectAll" />
+                    </th>
+                    <th class="sortable" @onclick='() => SetSort("name")'>Name @SortArrow("name")</th>
+                    <th class="sortable" @onclick='() => SetSort("designation")'>Designation @SortArrow("designation")</th>
+                    <th class="sortable" @onclick='() => SetSort("phone")'>Phone @SortArrow("phone")</th>
+                    <th class="sortable" style="width: 130px" @onclick='() => SetSort("enrollment")'>Enrollment @SortArrow("enrollment")</th>
+                    <th class="sortable right" @onclick='() => SetSort("netpay")'>
+                        Net Pay @SortArrow("netpay")
+                        <button class="icon-btn" style="padding: 2px; margin-left: 4px;" title="@(_netPayRevealed ? "Hide amounts" : "Show amounts")"
+                                @onclick="ToggleNetPayReveal" @onclick:stopPropagation="true">
+                            <Icon Name="@(_netPayRevealed ? "eye" : "eye-off")" Size="14" />
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var s in SortedStaff)
+                {
+                    var isSelected = _selectedIds.Contains(s.Id);
+                    var effectiveNet = s.NetPayOverride ?? Calculator.Compute(s.GrossPay, s.IsEpfEnabled, s.IsEsicEnabled).NetPay;
+                    <tr class="@(isSelected ? "selected" : "")" @key="s.Id">
+                        <td class="checkbox-cell" @onclick:stopPropagation="true">
+                            <input type="checkbox" checked="@isSelected" @onchange="e => ToggleRow(s.Id, (bool)e.Value!)" />
+                        </td>
+                        <td @onclick="() => OpenDrawer(s)">
+                            <div class="staff-name-cell">
+                                <div class="staff-avatar-sm">
+                                    @if (!string.IsNullOrEmpty(s.PhotoRelativePath))
+                                    {
+                                        <img src="@($"/{s.PhotoRelativePath}")" alt="" />
+                                    }
+                                    else
+                                    {
+                                        @Initials(s.DisplayName)
+                                    }
+                                </div>
+                                <div>
+                                    <div>@s.DisplayName</div>
+                                    <div class="stat-sub">@s.StaffCode</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td @onclick="() => OpenDrawer(s)">
+                            @s.Designation
+                            @if (!string.IsNullOrEmpty(s.SubDesignation))
+                            {
+                                <span class="stat-sub"> · @s.SubDesignation</span>
+                            }
+                        </td>
+                        <td @onclick="() => OpenDrawer(s)">
+                            @if (string.IsNullOrEmpty(s.PhoneNumber))
+                            {
+                                <span class="stat-sub">—</span>
+                            }
+                            else
+                            {
+                                @s.PhoneNumber
+                            }
+                        </td>
+                        <td @onclick="() => OpenDrawer(s)">
+                            @if (s.IsEpfEnabled)
+                            {
+                                <span class="badge active">EPF</span>
+                            }
+                            @if (s.IsEsicEnabled)
+                            {
+                                <span class="badge iob" style="margin-left: 4px;">ESIC</span>
+                            }
+                            @if (!s.IsEpfEnabled && !s.IsEsicEnabled)
+                            {
+                                <span class="stat-sub">—</span>
+                            }
+                        </td>
+                        <td class="right" @onclick="() => OpenDrawer(s)">
+                            @(_netPayRevealed ? $"₹{effectiveNet:N0}" : "₹••••••")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+}
+else
+{
+    <SoftDeletedList Items="_softDeletedStaff" RetentionDays="_retentionDays" OnChanged="ReloadAllAsync" />
+}
+
+<StaffProfileDrawer Visible="_showDrawer" VisibleChanged="v => _showDrawer = v"
+                     StaffMember="_selectedStaff" OnSaved="ReloadActiveAsync" />
+
+<AddStaffDialog Visible="_showAddDialog" VisibleChanged="v => _showAddDialog = v"
+                OnCreated="_ => ReloadActiveAsync()" />
+
+<RemoveStaffDialog Visible="_showRemoveDialog" VisibleChanged="v => _showRemoveDialog = v"
+                    Staff="_staffPendingRemoval" OnConfirm="ConfirmRemoveAsync" />
+
+@code {
+    private List<Staff> _activeStaff = new();
+    private List<Staff> _softDeletedStaff = new();
+    private string _filterTab = "Active";
+    private string _searchTerm = "";
+    private string _epfFilter = "all";
+    private string _esicFilter = "all";
+    private string _designationFilter = "all";
+    private string _subDesignationFilter = "all";
+    private bool _netPayRevealed = false;
+    private string _sortColumn = "name";
+    private bool _sortDescending = false;
+    private bool _loading;
+
+    private readonly HashSet<Guid> _selectedIds = new();
+    private bool _showDrawer;
+    private Staff? _selectedStaff;
+    private bool _showAddDialog;
+    private bool _showRemoveDialog;
+    private List<Staff> _staffPendingRemoval = new();
+    private int _retentionDays;
+
+    private bool AllSelected => SortedStaff.Any() && SortedStaff.All(s => _selectedIds.Contains(s.Id));
+
+    private List<string> _subDesignationOptions =>
+        _activeStaff.Where(s => !string.IsNullOrEmpty(s.SubDesignation))
+            .Select(s => s.SubDesignation!).Distinct().OrderBy(x => x).ToList();
+
+    private List<Staff> SortedStaff
+    {
+        get
+        {
+            IEnumerable<Staff> q = _activeStaff;
+            if (_subDesignationFilter != "all")
+                q = q.Where(s => s.SubDesignation == _subDesignationFilter);
+
+            q = _sortColumn switch
+            {
+                "name" => _sortDescending ? q.OrderByDescending(s => s.DisplayName) : q.OrderBy(s => s.DisplayName),
+                "designation" => _sortDescending
+                    ? q.OrderByDescending(s => s.Designation).ThenByDescending(s => s.SubDesignation)
+                    : q.OrderBy(s => s.Designation).ThenBy(s => s.SubDesignation),
+                "phone" => _sortDescending ? q.OrderByDescending(s => s.PhoneNumber) : q.OrderBy(s => s.PhoneNumber),
+                "enrollment" => _sortDescending
+                    ? q.OrderByDescending(s => (s.IsEpfEnabled ? 1 : 0) + (s.IsEsicEnabled ? 1 : 0))
+                    : q.OrderBy(s => (s.IsEpfEnabled ? 1 : 0) + (s.IsEsicEnabled ? 1 : 0)),
+                "netpay" => _sortDescending
+                    ? q.OrderByDescending(s => s.NetPayOverride ?? Calculator.Compute(s.GrossPay, s.IsEpfEnabled, s.IsEsicEnabled).NetPay)
+                    : q.OrderBy(s => s.NetPayOverride ?? Calculator.Compute(s.GrossPay, s.IsEpfEnabled, s.IsEsicEnabled).NetPay),
+                _ => q
+            };
+            return q.ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _retentionDays = Config.GetValue<int>("DataRetention:SoftDeleteRetentionDays", 60);
+        await ReloadAllAsync();
+    }
+
+    private async Task SwitchTab(string tab)
+    {
+        _filterTab = tab;
+        _selectedIds.Clear();
+        await ReloadAllAsync();
+    }
+
+    private async Task ReloadAllAsync()
+    {
+        await ReloadActiveAsync();
+        _softDeletedStaff = await StaffService.ListSoftDeletedAsync();
+    }
+
+    private async Task ReloadActiveAsync()
+    {
+        _loading = true;
+        bool? epfFilter = _epfFilter switch { "enabled" => true, "disabled" => false, _ => null };
+        bool? esicFilter = _esicFilter switch { "enabled" => true, "disabled" => false, _ => null };
+        StaffDesignation? designation = _designationFilter == "all" ? null : Enum.Parse<StaffDesignation>(_designationFilter);
+        _activeStaff = await StaffService.ListActiveAsync(_searchTerm, designation, epfFilter, esicFilter);
+        _loading = false;
+    }
+
+    private async Task OnEpfFilterChanged(ChangeEventArgs e)
+    {
+        _epfFilter = e.Value?.ToString() ?? "all";
+        await ReloadActiveAsync();
+    }
+
+    private async Task OnEsicFilterChanged(ChangeEventArgs e)
+    {
+        _esicFilter = e.Value?.ToString() ?? "all";
+        await ReloadActiveAsync();
+    }
+
+    private async Task OnDesignationFilterChanged(ChangeEventArgs e)
+    {
+        _designationFilter = e.Value?.ToString() ?? "all";
+        _subDesignationFilter = "all"; // clear, since options may change
+        await ReloadActiveAsync();
+    }
+
+    private void OnSubDesignationFilterChanged(ChangeEventArgs e)
+    {
+        _subDesignationFilter = e.Value?.ToString() ?? "all";
+    }
+
+    private void SetSort(string column)
+    {
+        if (_sortColumn == column) _sortDescending = !_sortDescending;
+        else { _sortColumn = column; _sortDescending = false; }
+    }
+
+    private string SortArrow(string column) => _sortColumn != column ? "" : (_sortDescending ? "▼" : "▲");
+
+    private void ToggleNetPayReveal() => _netPayRevealed = !_netPayRevealed;
+
+    private void OpenDrawer(Staff s)
+    {
+        _selectedStaff = s;
+        _showDrawer = true;
+    }
+
+    private void ToggleRow(Guid id, bool @checked)
+    {
+        if (@checked) _selectedIds.Add(id); else _selectedIds.Remove(id);
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        var check = (bool)e.Value!;
+        _selectedIds.Clear();
+        if (check) foreach (var s in SortedStaff) _selectedIds.Add(s.Id);
+    }
+
+    private void OpenBulkRemove()
+    {
+        _staffPendingRemoval = _activeStaff.Where(s => _selectedIds.Contains(s.Id)).ToList();
+        _showRemoveDialog = true;
+    }
+
+    private async Task ConfirmRemoveAsync(string? reason)
+    {
+        var ids = _staffPendingRemoval.Select(s => s.Id).ToList();
+        await StaffService.SoftDeleteManyAsync(ids, reason);
+
+        _selectedIds.Clear();
+        _staffPendingRemoval = new();
+        await ReloadAllAsync();
+    }
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        if (parts.Length == 1) return parts[0][..Math.Min(2, parts[0].Length)].ToUpper();
+        return $"{parts[0][0]}{parts[^1][0]}".ToUpper();
+    }
+}

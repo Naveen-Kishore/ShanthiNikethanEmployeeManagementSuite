@@ -1,0 +1,14 @@
+@page "/"
+@inject NavigationManager Nav
+@inject ModuleRegistry ModuleRegistry
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Send visitors straight into the first enabled module by
+        // NavigationOrder — currently Dashboard (order 5), which makes it
+        // the landing page automatically without any change needed here.
+        var target = ModuleRegistry.EnabledModules.FirstOrDefault()?.BasePath ?? "/staff";
+        Nav.NavigateTo(target, replace: true);
+    }
+}

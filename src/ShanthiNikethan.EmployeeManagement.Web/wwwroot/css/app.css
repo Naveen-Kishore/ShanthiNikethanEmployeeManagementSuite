@@ -1,0 +1,714 @@
+/* =============================================================================
+   Shanthi Nikethan Employee Management — Application Stylesheet
+   Microsoft Fluent 2 design language. Three themes: light, beige, dark.
+   ============================================================================= */
+
+* { box-sizing: border-box; }
+
+:root {
+    --font-sans: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    /* Fluent's dual-layer depth shadows: a tight "key light" shadow plus a
+       softer ambient one — this is what gives Fluent surfaces their
+       characteristic subtle, layered lift instead of a single flat blur. */
+    --shadow-sm: 0 0 2px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.14);
+    --shadow-md: 0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14);
+    --shadow-lg: 0 0 8px rgba(0,0,0,0.12), 0 14px 28px rgba(0,0,0,0.14);
+    --transition: 120ms cubic-bezier(0.33, 0, 0.67, 1);
+}
+
+/* ============================= LIGHT THEME ============================= */
+html[data-theme="light"] {
+    --bg-page: #FAF9F8;
+    --bg-surface: #FFFFFF;
+    --bg-surface-alt: #F5F5F5;
+    --bg-hover: #F0F0F0;
+    --border: #E0E0E0;
+    --text-primary: #242424;
+    --text-secondary: #616161;
+    --text-muted: #8A8886;
+
+    --accent: #0F6CBD;
+    --accent-hover: #115EA3;
+    --accent-soft: #EBF3FC;
+
+    --success: #0E700E;
+    --success-soft: #DFF6DD;
+    --warning: #9D5D00;
+    --warning-soft: #FFF4CE;
+    --danger: #C50F1F;
+    --danger-soft: #FDE7E9;
+
+    --bg-glass: rgba(255, 255, 255, 0.72);
+    --bg-nav: rgba(250, 249, 248, 0.94);   /* M365-style light grey, near-solid */
+    --bg-glass-solid: rgba(255, 255, 255, 0.90);
+}
+
+/* ============================= BEIGE THEME ============================= */
+html[data-theme="beige"] {
+    --bg-page: #F1ECE1;
+    --bg-surface: #FBF8F2;
+    --bg-surface-alt: #EFE8D9;
+    --bg-hover: #E7DFCC;
+    --border: #DACFB6;
+    --text-primary: #2A2419;
+    --text-secondary: #665D48;
+    --text-muted: #93876A;
+
+    --accent: #6B5A3C;
+    --accent-hover: #574A31;
+    --accent-soft: #E9DFC8;
+
+    --success: #56724A;
+    --success-soft: #E2E9D9;
+    --warning: #A17A2E;
+    --warning-soft: #F0E3C6;
+    --danger: #A2544A;
+    --danger-soft: #F1DCD6;
+
+    --bg-glass: rgba(251, 248, 242, 0.72);
+    --bg-nav: rgba(243, 237, 224, 0.94);
+    --bg-glass-solid: rgba(251, 248, 242, 0.90);
+}
+
+/* ============================= DARK THEME ============================== */
+html[data-theme="dark"] {
+    --bg-page: #1F1F1F;
+    --bg-surface: #292929;
+    --bg-surface-alt: #333333;
+    --bg-hover: #3B3A39;
+    --border: #484644;
+    --text-primary: #FFFFFF;
+    --text-secondary: #D6D6D6;
+    --text-muted: #A19F9D;
+
+    --accent: #479EF5;
+    --accent-hover: #62ABF5;
+    --accent-soft: #103D63;
+
+    --success: #6CCB5F;
+    --success-soft: #113A11;
+    --warning: #FCE100;
+    --warning-soft: #433519;
+    --danger: #F1707B;
+    --danger-soft: #442726;
+
+    --bg-glass: rgba(41, 41, 41, 0.70);
+    --bg-nav: rgba(32, 31, 30, 0.94);       /* M365 dark-portal charcoal, near-solid */
+    --bg-glass-solid: rgba(41, 41, 41, 0.88);
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1, h2, h3 { margin: 0 0 12px; font-weight: 600; color: var(--text-primary); }
+h1 { font-size: 22px; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; }
+
+/* ============================= APP SHELL ================================ */
+.app-shell {
+    min-height: 100vh;
+}
+
+.content {
+    padding: 84px 28px 24px;
+    margin-left: 240px;
+    max-width: 1400px;
+    min-height: 100vh;
+    transition: margin-left var(--transition);
+}
+.app-shell.nav-collapsed .content { margin-left: 64px; }
+
+/* ============================= SIDEBAR =================================== */
+/* Fixed position (not a flex sibling) so content genuinely scrolls behind
+   it — that's what makes the translucent blur actually show something,
+   and what keeps it "stuck" in place while the page scrolls. */
+.sidebar {
+    position: fixed;
+    top: 60px; left: 0; bottom: 0;
+    width: 240px;
+    z-index: 400;
+    background: var(--bg-nav);
+    backdrop-filter: blur(8px) saturate(1.2);
+    -webkit-backdrop-filter: blur(8px) saturate(1.2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: width var(--transition);
+}
+.app-shell.nav-collapsed .sidebar { width: 64px; }
+.app-shell.nav-collapsed .sidebar .nav-item .nav-label { display: none; }
+.app-shell.nav-collapsed .sidebar .nav-item { justify-content: center; }
+
+.sidebar-toggle { margin: 10px 0 2px 6px; align-self: flex-start; }
+
+.sidebar-nav { flex: 1; padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+
+.nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 13.5px; font-weight: 500;
+    transition: background var(--transition), color var(--transition);
+    position: relative;
+    white-space: nowrap;
+    text-decoration: none !important;
+}
+.nav-item:hover { background: var(--bg-hover); color: var(--text-primary); text-decoration: none !important; }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-item.active::before {
+    content: ""; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--accent);
+}
+/* Every Icon component renders as <span class="icon">; as a plain inline
+   span it sits on the text baseline, leaving room below for text
+   descenders (g, y, p) — making its box taller than the SVG itself and
+   throwing off anything sized from its content, like a round button.
+   This fixes it universally rather than patching each usage site. */
+.icon { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
+
+.nav-item .icon { flex-shrink: 0; }
+
+/* ============================= TOPBAR ===================================== */
+.topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 60px;
+    z-index: 500;
+    background: var(--bg-nav);
+    backdrop-filter: blur(8px) saturate(1.2);
+    -webkit-backdrop-filter: blur(8px) saturate(1.2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
+}
+
+.topbar-left { display: flex; align-items: center; gap: 14px; }
+
+.topbar-brand {
+    display: flex; align-items: center; gap: 10px;
+    text-decoration: none;
+}
+.topbar-brand:hover { text-decoration: none; opacity: 0.85; }
+.topbar-logo { width: 42px; height: 42px; object-fit: contain; flex-shrink: 0; }
+/* Swap logo variant with theme: dark logo on light/beige backgrounds, white logo on dark */
+.topbar-logo-dark { display: none; }
+html[data-theme="dark"] .topbar-logo-light { display: none; }
+html[data-theme="dark"] .topbar-logo-dark { display: block; }
+
+.topbar-brand-text { display: flex; flex-direction: column; justify-content: center; line-height: 1.25; }
+.topbar-brand-name { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.topbar-brand-sub { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+
+.topbar-actions { display: flex; align-items: center; gap: 16px; }
+
+.theme-toggle {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg-surface-alt);
+    color: var(--text-secondary);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+.theme-toggle:hover { background: var(--bg-hover); }
+
+.user-block { display: flex; align-items: center; gap: 10px; }
+
+.user-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+    flex-shrink: 0;
+}
+
+.user-name { font-size: 13px; font-weight: 500; }
+.user-signout { font-size: 11px; color: var(--text-muted); }
+
+/* ============================= BUTTONS ==================================== */
+button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 8px 16px;
+    font-size: 13.5px;
+    font-weight: 600;
+    transition: background var(--transition), opacity var(--transition), border-color var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+button.primary { background: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+button.secondary { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); }
+button.secondary:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--text-muted); }
+
+button.danger { background: var(--danger-soft); color: var(--danger); }
+button.danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
+
+button.ghost { background: transparent; color: var(--text-secondary); padding: 6px 10px; font-weight: 500; }
+button.ghost:hover:not(:disabled) { background: var(--bg-hover); }
+
+button.icon-btn { padding: 7px; border-radius: 50%; background: transparent; color: var(--text-secondary); font-weight: 500; }
+button.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ============================= CARDS / SURFACES =========================== */
+.card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.stat-sub { font-size: 12px; color: var(--text-muted); }
+
+/* ============================= FORMS ======================================= */
+label { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; }
+
+input[type="text"], input[type="email"], input[type="tel"], input[type="number"],
+input[type="date"], input[type="password"], textarea, select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13.5px;
+}
+/* Native <select> chrome varies by OS/browser and can visually override
+   custom border-radius on some platforms — strip it so our rounded
+   corners are actually respected everywhere, and replace the native
+   dropdown arrow it removes with a themed one. */
+select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 30px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%238A8886' d='M4.21967 8.46967C4.51256 8.17678 4.98744 8.17678 5.28033 8.46967L12 15.1893L18.7197 8.46967C19.0126 8.17678 19.4874 8.17678 19.7803 8.46967C20.0732 8.76256 20.0732 9.23744 19.7803 9.53033L12.5303 16.7803C12.2374 17.0732 11.7626 17.0732 11.4697 16.7803L4.21967 9.53033C3.92678 9.23744 3.92678 8.76256 4.21967 8.46967Z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 16px;
+}
+html[data-theme="dark"] select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%23A19F9D' d='M4.21967 8.46967C4.51256 8.17678 4.98744 8.17678 5.28033 8.46967L12 15.1893L18.7197 8.46967C19.0126 8.17678 19.4874 8.17678 19.7803 8.46967C20.0732 8.76256 20.0732 9.23744 19.7803 9.53033L12.5303 16.7803C12.2374 17.0732 11.7626 17.0732 11.4697 16.7803L4.21967 9.53033C3.92678 9.23744 3.92678 8.76256 4.21967 8.46967Z'/%3E%3C/svg%3E");
+}
+input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus, input[type="number"]:focus,
+input[type="date"]:focus, input[type="password"]:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+/* Suppress the visible focus ring that Blazor's <FocusOnNavigate> puts on
+   the page heading after every navigation — it's there for screen-reader
+   accessibility, not meant to be a visible box around the title. */
+h1:focus {
+    outline: none;
+}
+
+/* Override the browser's own autofill highlight colors so they match our
+   theme instead of Chrome's default yellow/blue tint bleeding through. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--text-primary);
+    -webkit-box-shadow: 0 0 0px 1000px var(--bg-surface-alt) inset;
+    box-shadow: 0 0 0px 1000px var(--bg-surface-alt) inset;
+    transition: background-color 5000s ease-in-out 0s;
+}
+input:read-only, input:disabled, textarea:read-only, textarea:disabled {
+    background: var(--bg-surface-alt);
+    color: var(--text-secondary);
+}
+
+.form-row { margin-bottom: 14px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.radio-label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; padding: 10px; border-radius: var(--radius-sm); }
+.radio-label:hover { background: var(--bg-hover); }
+.radio-label input { width: auto; margin-top: 3px; }
+
+/* Masked field (PAN, Aadhaar, EPF password) */
+.masked-field { position: relative; }
+.masked-field input { padding-right: 36px; font-family: ui-monospace, monospace; letter-spacing: 0.5px; }
+.masked-field .eye {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    background: transparent; color: var(--text-muted); padding: 6px; border-radius: 50%;
+}
+.masked-field .eye:hover { background: var(--bg-hover); color: var(--text-primary); }
+.masked-field.disabled .eye { opacity: 0.5; }
+
+/* ============================= TABLES ======================================= */
+.table-scroll { width: 100%; overflow-x: auto; border-radius: var(--radius-md); }
+table.grid { width: 100%; border-collapse: collapse; background: var(--bg-surface); overflow: hidden; }
+table.grid th {
+    text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); font-weight: 600;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-surface-alt);
+}
+table.grid th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+table.grid th.sortable:hover { color: var(--text-primary); }
+table.grid td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+table.grid tbody tr { transition: background var(--transition); cursor: pointer; }
+table.grid tbody tr:hover { background: var(--bg-hover); }
+table.grid tbody tr.selected { background: var(--accent-soft); }
+table.grid tbody tr:last-child td { border-bottom: none; }
+table.grid .right { text-align: right; }
+table.grid .checkbox-cell { text-align: center; cursor: default; vertical-align: middle; }
+table.grid input[type="checkbox"] { width: auto; }
+
+input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    vertical-align: middle;
+    accent-color: var(--accent);
+    outline: none;
+    cursor: pointer;
+}
+input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+.row-remove {
+    background: transparent; color: var(--text-muted);
+    padding: 4px 8px; border-radius: var(--radius-sm); font-size: 13px;
+}
+.row-remove:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* ============================= BADGES ======================================= */
+.badge {
+    display: inline-flex; align-items: center; padding: 3px 9px;
+    border-radius: 999px; font-size: 11px; font-weight: 600;
+    line-height: 1.4;
+}
+.badge.active { background: var(--success-soft); color: var(--success); }
+.badge.inactive { background: var(--danger-soft); color: var(--danger); }
+.badge.iob { background: var(--accent-soft); color: var(--accent); }
+.badge.manual { background: var(--warning-soft); color: var(--warning); }
+.badge.pending { background: var(--warning-soft); color: var(--warning); }
+
+/* ============================= MODALS / DIALOGS ============================= */
+.modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.14);
+    backdrop-filter: blur(8px) saturate(1.3);
+    -webkit-backdrop-filter: blur(8px) saturate(1.3);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+.modal {
+    background: var(--bg-glass-solid);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 0 2px rgba(0,0,0,0.14), 0 25px 50px rgba(0,0,0,0.22);
+    padding: 24px;
+    width: 100%;
+    max-width: 480px;
+    max-height: 88vh;
+    overflow-y: auto;
+}
+.modal.wide { max-width: 640px; }
+.modal-body { color: var(--text-secondary); font-size: 13.5px; margin-bottom: 16px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+.alert { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 12.5px; margin: 14px 0; }
+.alert.warning { background: var(--warning-soft); color: var(--warning); }
+.alert.danger { background: var(--danger-soft); color: var(--danger); }
+.alert.success { background: var(--success-soft); color: var(--success); }
+
+/* ============================= DRAWER (slide-out profile) =================== */
+.drawer-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(6px) saturate(1.3);
+    -webkit-backdrop-filter: blur(6px) saturate(1.3);
+    z-index: 1000;
+}
+.drawer {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: 480px; max-width: 92vw;
+    background: var(--bg-glass);
+    backdrop-filter: blur(30px) saturate(1.6);
+    -webkit-backdrop-filter: blur(30px) saturate(1.6);
+    border-left: 1px solid var(--border);
+    /* Directional flyout shadow — falls left, toward the page behind it */
+    box-shadow: -2px 0 8px rgba(0,0,0,0.10), -16px 0 40px rgba(0,0,0,0.16);
+    z-index: 1001;
+    display: flex; flex-direction: column;
+    animation: slideIn 200ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+.drawer-header {
+    padding: 20px 22px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.drawer-identity { display: flex; align-items: center; gap: 14px; }
+.drawer-avatar {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 17px; overflow: hidden; flex-shrink: 0;
+}
+.drawer-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.drawer-name { font-size: 16px; font-weight: 600; }
+.drawer-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.drawer-actions { display: flex; gap: 6px; }
+
+.drawer-tabs {
+    display: flex; align-items: center; gap: 4px; padding: 10px 22px 0; border-bottom: 1px solid var(--border);
+}
+.drawer-tab {
+    background: transparent; border: none; border-radius: 0;
+    padding: 8px 12px; font-size: 12.5px; font-weight: 500; line-height: 1.4;
+    color: var(--text-muted); border-bottom: 2px solid transparent;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.drawer-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.drawer-body { flex: 1; overflow-y: auto; padding: 20px 22px; }
+.drawer-footer {
+    padding: 16px 22px; border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 10px;
+}
+
+.calc-panel {
+    background: var(--bg-surface-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-top: 8px;
+}
+.calc-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+.calc-row .val { font-family: ui-monospace, monospace; }
+.calc-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; font-weight: 700; font-size: 14.5px; }
+.calc-row.total .val { color: var(--success); }
+.calc-row .deduction { color: var(--danger); }
+
+/* ============================= TOOLBAR ======================================= */
+.page-header { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
+.toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.search-box { position: relative; flex: 1; min-width: 220px; max-width: 320px; }
+.search-box input { padding-left: 30px; }
+.search-box .icon {
+    position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+    color: var(--text-muted); pointer-events: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    line-height: 0;
+}
+
+.filter-tabs { display: flex; gap: 4px; background: var(--bg-surface-alt); padding: 3px; border-radius: var(--radius-sm); }
+.filter-tab { background: transparent; padding: 6px 14px; font-size: 12.5px; color: var(--text-secondary); border-radius: var(--radius-sm); }
+.filter-tab.active { background: var(--bg-surface); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+
+.staff-name-cell { display: flex; align-items: center; gap: 10px; }
+.staff-avatar-sm {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; overflow: hidden; flex-shrink: 0;
+}
+.staff-avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
+
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+.empty-state .icon { margin-bottom: 12px; opacity: 0.5; }
+
+.purge-countdown { font-size: 11.5px; }
+.purge-countdown.urgent { color: var(--danger); font-weight: 600; }
+
+/* ============================= RESPONSIVE ==================================== */
+@media (max-width: 800px) {
+    /* Mobile always shows the icon-only rail, permanently — regardless of
+       the desktop expand/collapse toggle state. No hide/show, no overlay,
+       no backdrop needed: the rail is simply always there. */
+    .sidebar,
+    .app-shell.nav-collapsed .sidebar,
+    .app-shell:not(.nav-collapsed) .sidebar {
+        width: 64px;
+    }
+    .sidebar .nav-item .nav-label {
+        display: none;
+    }
+    .sidebar .nav-item { justify-content: center; }
+    .sidebar-toggle { display: none; }
+
+    .content,
+    .app-shell.nav-collapsed .content,
+    .app-shell:not(.nav-collapsed) .content {
+        margin-left: 64px;
+        padding: 76px 16px 16px;
+    }
+
+    .form-grid { grid-template-columns: 1fr; }
+    .drawer { width: 100vw; max-width: 100vw; }
+}
+
+/* ============================= LEAVE MODULE =================================== */
+.leave-chip-avatar {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+.leave-chip-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.leave-chip-avatar-sm { width: 14px; height: 14px; font-size: 7.5px; }
+
+@media (max-width: 700px) {
+    /* On narrow screens the avatar alone (photo, or colored initials as a
+       fallback) represents the person — the full name is dropped so day
+       cells never have to stretch to fit long names. */
+    .leave-chip-full { display: none; }
+}
+
+/* Only at genuinely narrow phone widths does the stacked brand text get
+   dropped in favor of the logo alone — a shrunk browser window (or a
+   tablet) still has room for it, real phones don't. */
+@media (max-width: 480px) {
+    .topbar-brand-text { display: none; }
+}
+
+/* ============================= BLAZOR ERROR BANNER =========================== */
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 2000;
+    background: var(--danger);
+    color: #fff;
+    padding: 12px 20px;
+    font-size: 13px;
+    box-shadow: var(--shadow-lg);
+}
+#blazor-error-ui .reload { color: #fff; font-weight: 600; text-decoration: underline; margin-left: 10px; }
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    float: right;
+    padding: 0 6px;
+}
+
+/* ============================= DASHBOARD ==================================== */
+.dash-kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 10px;
+}
+
+.dash-kpi-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+    transition: transform var(--transition), box-shadow var(--transition);
+}
+.dash-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06), 0 10px 24px rgba(0,0,0,0.08);
+}
+
+.dash-kpi-icon {
+    width: 36px; height: 36px;
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 12px;
+}
+.dash-icon-blue   { background: var(--accent-soft);  color: var(--accent); }
+.dash-icon-green  { background: var(--success-soft); color: var(--success); }
+.dash-icon-teal   { background: #DFF3F3; color: #0F6666; }
+.dash-icon-purple { background: #EFE7FB; color: #5A369A; }
+.dash-icon-orange { background: var(--warning-soft); color: var(--warning); }
+html[data-theme="dark"] .dash-icon-teal   { background: rgba(15, 140, 140, 0.22); color: #6FDCDC; }
+html[data-theme="dark"] .dash-icon-purple { background: rgba(122, 79, 201, 0.22); color: #C7AAF0; }
+
+.dash-kpi-value { font-size: 26px; font-weight: 700; color: var(--text-primary); line-height: 1.15; }
+.dash-kpi-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-top: 2px; }
+
+.dash-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 4px;
+}
+
+.dash-panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+}
+.dash-panel h3 {
+    font-size: 14.5px;
+    font-weight: 600;
+    margin: 0 0 14px 0;
+    color: var(--text-primary);
+}
+
+@media (max-width: 900px) {
+    .dash-grid { grid-template-columns: 1fr; }
+    .dash-panel[style*="span 2"] { grid-column: span 1 !important; }
+}
+
+/* ============================= ATTENDANCE REGISTER ========================== */
+.attendance-register-scroll {
+    max-height: 68vh;
+    overflow-y: auto;
+}
+/* Sticky positioning on table cells reliably breaks under border-collapse:
+   collapse in most browsers — this table needs "separate" specifically so
+   the sticky header actually works. */
+.attendance-register {
+    border-collapse: separate !important;
+    border-spacing: 0;
+    overflow: visible !important;
+}
+.attendance-register th, .attendance-register td {
+    border-right: 1px solid var(--border);
+}
+/* Every header cell gets the same background, regardless of Sunday or not —
+   uniformity here, the Sunday tint still applies to body cells. */
+.attendance-register thead th {
+    background: var(--bg-surface-alt) !important;
+}

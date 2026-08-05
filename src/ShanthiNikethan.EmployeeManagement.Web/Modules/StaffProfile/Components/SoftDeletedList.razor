@@ -1,0 +1,103 @@
+@inject IStaffProfileService StaffService
+@inject IJSRuntime JS
+
+@if (_loading)
+{
+    <p class="stat-sub">Loading…</p>
+}
+else if (Items.Count == 0)
+{
+    <div class="empty-state">
+        <div class="icon"><Icon Name="trash-2" Size="36" /></div>
+        <p>No soft-deleted staff. Anyone you remove will show up here for 60 days.</p>
+    </div>
+}
+else
+{
+    <table class="grid">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Designation</th>
+                <th>Account number</th>
+                <th>Removed</th>
+                <th>Reason</th>
+                <th>Purge countdown</th>
+                <th style="width: 120px"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in Items)
+            {
+                var daysLeft = s.DaysUntilPurge(RetentionDays);
+                <tr>
+                    <td>
+                        <div class="staff-name-cell">
+                            <div class="staff-avatar-sm">@Initials(s.DisplayName)</div>
+                            <div>
+                                <div>@s.DisplayName</div>
+                                <div class="stat-sub">@s.StaffCode</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>@s.Designation</td>
+                    <td>@s.BankAccountNumber</td>
+                    <td>
+                        @if (s.SoftDeletedAtUtc == null)
+                        {
+                            <span class="stat-sub">—</span>
+                        }
+                        else
+                        {
+                            @s.SoftDeletedAtUtc.Value.ToLocalTime().ToString("dd MMM yyyy")
+                        }
+                    </td>
+                    <td class="stat-sub">@(string.IsNullOrWhiteSpace(s.SoftDeleteReason) ? "—" : s.SoftDeleteReason)</td>
+                    <td>
+                        <span class="purge-countdown @(daysLeft <= 7 ? "urgent" : "")">
+                            @daysLeft day@(daysLeft == 1 ? "" : "s") left
+                        </span>
+                    </td>
+                    <td>
+                        <button class="secondary" @onclick="() => ReactivateAsync(s)">
+                            <Icon Name="check" Size="14" /> Reactivate
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter] public List<Staff> Items { get; set; } = new();
+    [Parameter] public int RetentionDays { get; set; } = 60;
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool _loading;
+
+    private async Task ReactivateAsync(Staff s)
+    {
+        _loading = true;
+        try
+        {
+            var ok = await StaffService.ReactivateAsync(s.Id);
+            if (ok)
+            {
+                await OnChanged.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        if (parts.Length == 1) return parts[0][..Math.Min(2, parts[0].Length)].ToUpper();
+        return $"{parts[0][0]}{parts[^1][0]}".ToUpper();
+    }
+}

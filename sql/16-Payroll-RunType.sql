@@ -12,7 +12,7 @@
 -- script.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.PayrollRun') AND name = 'RunType')

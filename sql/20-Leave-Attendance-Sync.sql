@@ -7,7 +7,7 @@
 -- happens to cover the same date as part of a multi-day range).
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.LeaveRecord') AND name = 'IsSyncedFromAttendance')

@@ -12,7 +12,7 @@
 -- does both steps in the right order.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF EXISTS (

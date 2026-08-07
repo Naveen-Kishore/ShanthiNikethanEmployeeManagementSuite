@@ -20,7 +20,7 @@
 -- GrossPay = 0, so already-corrected staff are skipped automatically.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 DECLARE @EsicThreshold DECIMAL(12,2) = 21000;

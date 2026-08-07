@@ -9,7 +9,7 @@ public class AttendanceModule : IModule
 {
     public string Name => "Attendance";
     public string DisplayName => "Attendance";
-    public string Icon => "check";
+    public string Icon => "clipboard-task-list-rtl";
     public string BasePath => "/attendance";
     public int NavigationOrder => 12; // right after Staff Directory (10), before Leave (15)
 

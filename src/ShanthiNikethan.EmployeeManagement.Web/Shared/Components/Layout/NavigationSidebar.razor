@@ -1,18 +1,62 @@
 @inject ModuleRegistry ModuleRegistry
 @inject NavigationManager Nav
+@inject ICurrentUser CurrentUser
 
 <aside class="sidebar @(IsOpen ? "open" : "")">
     <button class="icon-btn sidebar-toggle" @onclick="OnToggle" title="@(IsOpen ? "Collapse navigation" : "Expand navigation")">
         <Icon Name="menu" />
     </button>
     <nav class="sidebar-nav">
-        @foreach (var module in ModuleRegistry.EnabledModules)
+        @for (int i = 0; i < _visibleModules.Count; i++)
         {
-            var active = Nav.Uri.Contains(module.BasePath, StringComparison.OrdinalIgnoreCase);
-            <a class="nav-item @(active ? "active" : "")" href="@module.BasePath" title="@module.DisplayName">
-                <Icon Name="@module.Icon" />
-                <span class="nav-label">@module.DisplayName</span>
-            </a>
+            var module = _visibleModules[i];
+            if (string.IsNullOrEmpty(module.GroupName))
+            {
+                var active = Nav.Uri.Contains(module.BasePath, StringComparison.OrdinalIgnoreCase);
+                <a class="nav-item @(active ? "active" : "")" href="@module.BasePath" title="@module.DisplayName">
+                    <Icon Name="@module.Icon" />
+                    <span class="nav-label">@module.DisplayName</span>
+                </a>
+            }
+            else
+            {
+                var isFirstInGroup = i == 0 || _visibleModules[i - 1].GroupName != module.GroupName;
+                if (isFirstInGroup)
+                {
+                    var groupName = module.GroupName!;
+                    var groupIcon = _visibleModules.Where(m => m.GroupName == groupName).Select(m => m.GroupIcon).FirstOrDefault(g => g != null) ?? module.Icon;
+                    var isExpanded = _expandedGroups.Contains(groupName);
+
+                    <div class="nav-group @(isExpanded ? "expanded" : "")">
+                        @* No active/selected styling on the group header itself, ever -
+                           only the actual selected sub-item below should show the
+                           marker. This is a deliberate, permanent pattern: applies
+                           here and to any future grouped nav entries the same way. *@
+                        <button type="button" class="nav-item nav-group-header" @onclick="() => ToggleGroup(groupName)">
+                            <Icon Name="@groupIcon" />
+                            <span class="nav-label">@groupName</span>
+                            <Icon Name="chevron-down" Size="14" Style="@($"margin-left: auto; transition: transform 150ms; transform: rotate({(isExpanded ? "180" : "0")}deg);")" />
+                        </button>
+
+                        @* Sub-items always render in the DOM now (not gated behind
+                           isExpanded) so icon-only mode can reveal them purely via
+                           CSS :hover/:focus-within, with no click needed at all.
+                           In full-width mode, the .expanded class above still
+                           controls visibility exactly as before - same click-to-
+                           toggle behavior, just driven by a CSS class instead of
+                           conditional rendering. *@
+                        <div class="nav-subitems">
+                            @foreach (var sub in _visibleModules.Where(m => m.GroupName == groupName))
+                            {
+                                var subActive = Nav.Uri.Contains(sub.BasePath, StringComparison.OrdinalIgnoreCase);
+                                <a class="nav-item nav-subitem @(subActive ? "active" : "")" href="@sub.BasePath" title="@sub.DisplayName">
+                                    <span class="nav-label">@sub.DisplayName</span>
+                                </a>
+                            }
+                        </div>
+                    </div>
+                }
+            }
         }
     </nav>
 </aside>
@@ -20,4 +64,28 @@
 @code {
     [Parameter] public bool IsOpen { get; set; }
     [Parameter] public EventCallback OnToggle { get; set; }
+
+    private List<IModule> _visibleModules =>
+        ModuleRegistry.EnabledModules
+            .Where(m => ModuleAccessMap.CanView(m.Name, CurrentUser.HasPermission))
+            .ToList();
+    private HashSet<string> _expandedGroups = new();
+
+    protected override void OnInitialized()
+    {
+        // Auto-expand using the full module list, not the permission-filtered
+        // one - avoids depending on permissions already being loaded at this
+        // exact moment.
+        foreach (var m in ModuleRegistry.EnabledModules.Where(m => m.GroupName != null))
+        {
+            if (Nav.Uri.Contains(m.BasePath, StringComparison.OrdinalIgnoreCase))
+                _expandedGroups.Add(m.GroupName!);
+        }
+    }
+
+    private void ToggleGroup(string groupName)
+    {
+        if (!_expandedGroups.Add(groupName))
+            _expandedGroups.Remove(groupName);
+    }
 }

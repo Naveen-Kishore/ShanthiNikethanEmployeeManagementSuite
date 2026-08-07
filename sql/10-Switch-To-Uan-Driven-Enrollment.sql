@@ -18,7 +18,7 @@
 -- Add those individually via each profile's Statutory tab as you get them.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 -- Step 1: Drop the old toggle column, if present. SQL Server auto-creates a

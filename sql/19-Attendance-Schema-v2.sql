@@ -11,7 +11,7 @@
 -- table entirely — the old single-Status column is gone.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF OBJECT_ID('dbo.AttendanceRecord', 'U') IS NOT NULL DROP TABLE dbo.AttendanceRecord;

@@ -19,7 +19,7 @@
 -- person by person.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 UPDATE dbo.Staff SET GrossPay = 14750 WHERE StaffCode = 'SNM-T-015'; -- BHARADEESWARI M

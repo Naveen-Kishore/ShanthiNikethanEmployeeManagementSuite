@@ -18,7 +18,7 @@
 -- Safe to run repeatedly. NetPayOverride is never touched.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 DECLARE @EsicThreshold  DECIMAL(12,2) = 21000;

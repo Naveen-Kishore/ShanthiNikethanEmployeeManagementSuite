@@ -1,0 +1,98 @@
+@page "/identity-provider"
+@inject IConfiguration Config
+@inject ICurrentUser CurrentUser
+@inject IJSRuntime JS
+
+<h1>Identity Provider Settings</h1>
+
+@if (!CurrentUser.HasPermission("Admin.ManageRoleGroups") && !CurrentUser.HasPermission("Admin.ManageUsers"))
+{
+    <p class="stat-sub">You don't have permission to view this page.</p>
+}
+else
+{
+    <div class="calc-panel" style="max-width: 640px; margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 10px; font-weight: 600;">Currently active configuration</label>
+        <div class="form-row"><label>Tenant ID</label><div>@(CurrentTenantId ?? "— Not configured —")</div></div>
+        <div class="form-row"><label>Client (App) ID</label><div>@(CurrentClientId ?? "— Not configured —")</div></div>
+        <p class="stat-sub">The Client Secret is never displayed here, even if one is configured — this page only ever reads Tenant ID and Client ID for display, nothing more sensitive.</p>
+    </div>
+
+    <div class="calc-panel" style="max-width: 640px; margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Generate a config snippet</label>
+        <p class="stat-sub" style="margin-bottom: 14px;">
+            This does not save anything — nothing here is written to the database, ever. It only builds the exact
+            text to paste into <code>appsettings.json</code> (or Azure App Service's Configuration blade once
+            deployed) yourself, followed by an app restart to actually take effect.
+        </p>
+        <div class="form-row">
+            <label>Tenant ID</label>
+            <input type="text" @bind="_tenantId" placeholder="e.g. 11111111-2222-3333-4444-555555555555" />
+        </div>
+        <div class="form-row">
+            <label>Client (App) ID</label>
+            <input type="text" @bind="_clientId" placeholder="e.g. 66666666-7777-8888-9999-000000000000" />
+        </div>
+        <div class="form-row">
+            <label>Client Secret (optional)</label>
+            <input type="password" @bind="_clientSecret" placeholder="Leave blank if this app registration has no secret" />
+        </div>
+        <button class="secondary" @onclick="GenerateSnippet">Generate snippet</button>
+
+        @if (!string.IsNullOrEmpty(_snippet))
+        {
+            <div class="form-row" style="margin-top: 16px;">
+                <label>Paste this into appsettings.json</label>
+                <textarea readonly rows="8" style="font-family: monospace; font-size: 12.5px; width: 100%;" id="snippetBox">@_snippet</textarea>
+                <button class="secondary" style="margin-top: 8px;" @onclick="CopySnippet">@(_copied ? "Copied!" : "Copy to clipboard")</button>
+            </div>
+        }
+    </div>
+
+    <div class="calc-panel" style="max-width: 640px;">
+        <label style="display: block; margin-bottom: 10px; font-weight: 600;">How to set this up in Entra ID</label>
+        <ol style="font-size: 13px; color: var(--text-secondary); line-height: 1.9; padding-left: 20px;">
+            <li>In the Entra admin center, go to <strong>App registrations</strong> → <strong>New registration</strong>. Give it a name, and set the redirect URI to your site's <code>/signin-oidc</code> path (e.g. <code>https://yourschool.example.com/signin-oidc</code>).</li>
+            <li>Copy the <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> from the registration's Overview page — these go in the fields above.</li>
+            <li>If you need a Client Secret, go to <strong>Certificates &amp; secrets</strong> → <strong>New client secret</strong>. Copy the secret's <em>value</em> immediately — Entra only shows it once.</li>
+            <li>
+                Go to <strong>Enterprise applications</strong>, find the same app, and open <strong>Properties</strong>.
+                Set <strong>Assignment required?</strong> to <strong>Yes</strong>, then go to <strong>Users and groups</strong>
+                and explicitly assign the staff who should be able to sign in. This is a genuinely stronger control than
+                our own allow-list — Entra itself refuses to issue a token to anyone not assigned, before your app is
+                ever involved. This works without a P1/P2 license, as long as you're assigning individual people rather
+                than groups.
+            </li>
+            <li><strong>Important:</strong> assign yourself too. With Assignment required enabled, even you won't be able to sign in to this specific app until you're explicitly assigned — this doesn't lock you out of Entra ID itself, just this one application.</li>
+            <li>Paste the generated snippet into <code>appsettings.json</code> (or your hosting environment's configuration) and restart the app.</li>
+        </ol>
+    </div>
+}
+
+@code {
+    private string? CurrentTenantId => Config["AzureAd:TenantId"];
+    private string? CurrentClientId => Config["AzureAd:ClientId"];
+
+    private string _tenantId = "";
+    private string _clientId = "";
+    private string _clientSecret = "";
+    private string _snippet = "";
+    private bool _copied;
+
+    private void GenerateSnippet()
+    {
+        _copied = false;
+        var secretLine = string.IsNullOrWhiteSpace(_clientSecret) ? "" : $",\n    \"ClientSecret\": \"{_clientSecret}\"";
+        _snippet = "\"AzureAd\": {\n"
+            + "    \"Instance\": \"https://login.microsoftonline.com/\",\n"
+            + $"    \"TenantId\": \"{_tenantId}\",\n"
+            + $"    \"ClientId\": \"{_clientId}\"{secretLine}\n"
+            + "}";
+    }
+
+    private async Task CopySnippet()
+    {
+        await JS.InvokeVoidAsync("siteHelpers.copyText", _snippet);
+        _copied = true;
+    }
+}

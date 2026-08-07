@@ -1,6 +1,15 @@
 // Small JS interop helpers for Shanthi Nikethan Employee Management
 
 window.siteHelpers = {
+    /// Copies text to the clipboard - returns true/false so the caller can show a confirmation.
+    copyText: function (text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(function () { });
+            return true;
+        }
+        return false;
+    },
+
     /// Triggers a browser download for a byte array produced server-side.
     downloadFile: function (fileName, base64Content, mimeType) {
         var link = document.createElement('a');
@@ -27,6 +36,44 @@ window.siteHelpers = {
     /// the @media (max-width: 800px) rule in app.css).
     isMobileWidth: function () {
         return window.innerWidth <= 800;
+    },
+
+    _resizeHandler: null,
+
+    /// Watches for the viewport crossing the mobile/desktop breakpoint
+    /// (not every resize pixel - only actual crossings, debounced 150ms)
+    /// and calls back into Blazor so layout state can be corrected live,
+    /// without needing a page refresh. dotNetRef is a DotNetObjectReference
+    /// to a component exposing a [JSInvokable] OnViewportBreakpointChanged(bool).
+    registerBreakpointListener: function (dotNetRef) {
+        window.siteHelpers.unregisterBreakpointListener();
+
+        var lastIsMobile = window.siteHelpers.isMobileWidth();
+        var debounceTimer = null;
+
+        function handleResize() {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(function () {
+                var isMobile = window.siteHelpers.isMobileWidth();
+                if (isMobile !== lastIsMobile) {
+                    lastIsMobile = isMobile;
+                    dotNetRef.invokeMethodAsync('OnViewportBreakpointChanged', isMobile);
+                }
+            }, 150);
+        }
+
+        window.addEventListener('resize', handleResize);
+        window.siteHelpers._resizeHandler = handleResize;
+    },
+
+    /// Removes the listener registered above — call this from the
+    /// component's dispose logic so it doesn't keep firing (and keep a
+    /// stale DotNetObjectReference alive) after the page/circuit is gone.
+    unregisterBreakpointListener: function () {
+        if (window.siteHelpers._resizeHandler) {
+            window.removeEventListener('resize', window.siteHelpers._resizeHandler);
+            window.siteHelpers._resizeHandler = null;
+        }
     },
 
     /// Starts a 15-minute inactivity timer that signs the user out

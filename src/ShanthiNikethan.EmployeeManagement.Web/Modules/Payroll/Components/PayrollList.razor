@@ -1,6 +1,7 @@
 @page "/payroll"
 @inject IPayrollService PayrollService
 @inject NavigationManager Nav
+@inject ICurrentUser CurrentUser
 
 <h1>Payroll</h1>
 
@@ -120,7 +121,15 @@ else
     private string _selectedRunType = "RegularSalary";
     private string _otherLabel = "";
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.HasPermission("Payroll.View"))
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+        await ReloadAsync();
+    }
 
     private async Task ReloadAsync()
     {

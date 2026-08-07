@@ -10,7 +10,7 @@
 -- published rows as read-only history.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF OBJECT_ID('dbo.PayrollLineItem', 'U') IS NOT NULL DROP TABLE dbo.PayrollLineItem;

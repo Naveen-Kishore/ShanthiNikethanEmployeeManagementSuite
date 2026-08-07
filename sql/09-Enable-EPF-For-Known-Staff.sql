@@ -19,7 +19,7 @@
 -- the report alone. Uncomment the correct line below once you know.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 UPDATE dbo.Staff SET IsEpfEnabled = 1

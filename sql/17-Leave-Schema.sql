@@ -6,7 +6,7 @@
 -- makes what's currently only a WhatsApp message permanently searchable.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF OBJECT_ID('dbo.LeaveRecord', 'U') IS NOT NULL DROP TABLE dbo.LeaveRecord;

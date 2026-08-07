@@ -1,4 +1,5 @@
 @inject IStaffProfileService StaffService
+@inject ICurrentUser CurrentUser
 
 @if (Visible)
 {
@@ -66,12 +67,19 @@
                         <option value="ManualNeft">Manual NEFT/RTGS</option>
                     </select>
                 </div>
-                <div class="form-row">
-                    <label>Gross pay (₹)</label>
-                    <input type="number" @bind="_grossPay" min="0" step="1" placeholder="Leave 0 if unknown yet" />
-                </div>
+                @if (CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
+                {
+                    <div class="form-row">
+                        <label>Gross pay (₹)</label>
+                        <input type="number" @bind="_grossPay" min="0" step="1" placeholder="Leave 0 if unknown yet" />
+                    </div>
+                }
             </div>
 
+            @if (!CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
+            {
+                <div class="stat-sub">Salary setup is completed separately by an administrator.</div>
+            }
             <div class="stat-sub">EPF and ESIC enrollment are set later from the staff profile's Statutory tab, once you have their UAN / ESIC number.</div>
 
             @if (!string.IsNullOrEmpty(_error))

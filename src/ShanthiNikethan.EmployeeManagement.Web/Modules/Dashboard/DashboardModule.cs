@@ -8,7 +8,7 @@ public class DashboardModule : IModule
 {
     public string Name => "Dashboard";
     public string DisplayName => "Dashboard";
-    public string Icon => "chart-bar";
+    public string Icon => "dashboard";
     public string BasePath => "/dashboard";
     public int NavigationOrder => 5;
 

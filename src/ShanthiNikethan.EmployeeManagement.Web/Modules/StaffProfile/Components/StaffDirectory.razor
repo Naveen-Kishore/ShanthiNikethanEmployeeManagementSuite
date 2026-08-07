@@ -2,6 +2,7 @@
 @inject IStaffProfileService StaffService
 @inject IConfiguration Config
 @inject StatutorySalaryCalculator Calculator
+@inject ICurrentUser CurrentUser
 
 <h1>Staff Directory</h1>
 
@@ -86,13 +87,16 @@
                     <th class="sortable" @onclick='() => SetSort("designation")'>Designation @SortArrow("designation")</th>
                     <th class="sortable" @onclick='() => SetSort("phone")'>Phone @SortArrow("phone")</th>
                     <th class="sortable" style="width: 130px" @onclick='() => SetSort("enrollment")'>Enrollment @SortArrow("enrollment")</th>
-                    <th class="sortable right" @onclick='() => SetSort("netpay")'>
-                        Net Pay @SortArrow("netpay")
-                        <button class="icon-btn" style="padding: 2px; margin-left: 4px;" title="@(_netPayRevealed ? "Hide amounts" : "Show amounts")"
-                                @onclick="ToggleNetPayReveal" @onclick:stopPropagation="true">
-                            <Icon Name="@(_netPayRevealed ? "eye" : "eye-off")" Size="14" />
-                        </button>
-                    </th>
+                    @if (CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
+                    {
+                        <th class="sortable right" @onclick='() => SetSort("netpay")'>
+                            Net Pay @SortArrow("netpay")
+                            <button class="icon-btn" style="padding: 2px; margin-left: 4px;" title="@(_netPayRevealed ? "Hide amounts" : "Show amounts")"
+                                    @onclick="ToggleNetPayReveal" @onclick:stopPropagation="true">
+                                <Icon Name="@(_netPayRevealed ? "eye" : "eye-off")" Size="14" />
+                            </button>
+                        </th>
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -153,9 +157,12 @@
                                 <span class="stat-sub">—</span>
                             }
                         </td>
-                        <td class="right" @onclick="() => OpenDrawer(s)">
-                            @(_netPayRevealed ? $"₹{effectiveNet:N0}" : "₹••••••")
-                        </td>
+                        @if (CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
+                        {
+                            <td class="right" @onclick="() => OpenDrawer(s)">
+                                @(_netPayRevealed ? $"₹{effectiveNet:N0}" : "₹••••••")
+                            </td>
+                        }
                     </tr>
                 }
             </tbody>

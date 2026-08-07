@@ -30,7 +30,7 @@
 -- script knows who's enrolled in what.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 DECLARE @EpfRate  DECIMAL(10,6) = 0.06;    -- 50% (Basic) * 12% (Employee EPF)

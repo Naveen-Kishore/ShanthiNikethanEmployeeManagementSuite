@@ -16,15 +16,16 @@ public interface ILeaveService
     Task DeleteAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
-    /// Called by Attendance when someone marks/un-marks "Leave" for a
-    /// specific day. dayFraction is 0.5 (one session) or 1.0 (both) —
-    /// creates or updates a single-day record for that exact date, tagged
+    /// Called by Attendance whenever someone's Morning/Evening status
+    /// changes. Any non-Present status (Absent, Casual Leave, or Leave)
+    /// syncs to a single-day record here — same data, one place to see
+    /// why someone wasn't at work, regardless of which module you marked
+    /// it in. Creates/updates/deletes a record tagged
     /// IsSyncedFromAttendance so it's clearly distinct from anything
-    /// entered directly in Leave Management. dayFraction of 0 removes the
-    /// synced record if one exists. Never touches a manually-entered
-    /// record, even one covering the same date as part of a longer range.
+    /// entered directly in Leave Management, and never touches a
+    /// manually-entered record even if it covers the same date.
     /// </summary>
-    Task SyncFromAttendanceAsync(Guid staffId, DateOnly date, decimal dayFraction, CancellationToken ct = default);
+    Task SyncFromAttendanceAsync(Guid staffId, DateOnly date, string morningStatus, string eveningStatus, CancellationToken ct = default);
 }
 
 public class LeaveService : ILeaveService
@@ -135,7 +136,7 @@ public class LeaveService : ILeaveService
             context: $"{record.StaffDisplayName}: {record.DaysCount} day(s) from {record.StartDate:dd MMM yyyy}", ct: ct);
     }
 
-    public async Task SyncFromAttendanceAsync(Guid staffId, DateOnly date, decimal dayFraction, CancellationToken ct = default)
+    public async Task SyncFromAttendanceAsync(Guid staffId, DateOnly date, string morningStatus, string eveningStatus, CancellationToken ct = default)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
 
@@ -145,6 +146,10 @@ public class LeaveService : ILeaveService
 
         if (existing != null && !existing.IsSyncedFromAttendance)
             return; // a manually-entered record already covers this date — never touch it
+
+        var morningAway = morningStatus is "Absent" or "CasualLeave" or "Leave";
+        var eveningAway = eveningStatus is "Absent" or "CasualLeave" or "Leave";
+        var dayFraction = (morningAway ? 0.5m : 0m) + (eveningAway ? 0.5m : 0m);
 
         if (dayFraction <= 0)
         {
@@ -158,14 +163,16 @@ public class LeaveService : ILeaveService
             return;
         }
 
+        var reason = BuildAttendanceSyncReason(morningStatus, eveningStatus, morningAway, eveningAway);
+
         if (existing != null)
         {
-            // Update the synced record's day count (e.g. half-day -> full-day).
-            if (existing.DaysCount == dayFraction) return;
+            if (existing.DaysCount == dayFraction && existing.Reason == reason) return;
             existing.DaysCount = dayFraction;
+            existing.Reason = reason;
             await db.SaveChangesAsync(ct);
             await _audit.LogAsync("Leave", "LeaveRecord", existing.Id.ToString(), "Update",
-                context: $"Synced from Attendance — {existing.StaffDisplayName}, {date:dd MMM yyyy}: {dayFraction} day(s)", ct: ct);
+                context: $"Synced from Attendance — {existing.StaffDisplayName}, {date:dd MMM yyyy}: {reason}", ct: ct);
             return;
         }
 
@@ -182,7 +189,7 @@ public class LeaveService : ILeaveService
             StartDate = date,
             EndDate = date,
             DaysCount = dayFraction,
-            Reason = "Marked via Attendance",
+            Reason = reason,
             IsSyncedFromAttendance = true,
             CreatedAtUtc = DateTime.UtcNow,
             CreatedByObjectId = _user.ObjectId,
@@ -192,6 +199,25 @@ public class LeaveService : ILeaveService
         await db.SaveChangesAsync(ct);
 
         await _audit.LogAsync("Leave", "LeaveRecord", record.Id.ToString(), "Create",
-            context: $"Synced from Attendance — {record.StaffDisplayName}, {date:dd MMM yyyy}: {dayFraction} day(s)", ct: ct);
+            context: $"Synced from Attendance — {record.StaffDisplayName}, {date:dd MMM yyyy}: {reason}", ct: ct);
+    }
+
+    private static string BuildAttendanceSyncReason(string morningStatus, string eveningStatus, bool morningAway, bool eveningAway)
+    {
+        static string Label(string status) => status switch
+        {
+            "CasualLeave" => "Casual Leave",
+            "Leave" => "Leave",
+            "Absent" => "Absent",
+            _ => "Present"
+        };
+
+        if (morningAway && eveningAway && morningStatus == eveningStatus)
+            return $"{Label(morningStatus)} (via Attendance)";
+        if (morningAway && eveningAway)
+            return $"Morning: {Label(morningStatus)}, Evening: {Label(eveningStatus)} (via Attendance)";
+        if (morningAway)
+            return $"Morning: {Label(morningStatus)} (via Attendance)";
+        return $"Evening: {Label(eveningStatus)} (via Attendance)";
     }
 }

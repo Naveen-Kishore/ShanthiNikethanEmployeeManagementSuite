@@ -1,0 +1,938 @@
+@page "/admin"
+@inject IUserAccountService UserAccountService
+@inject IStaffProfileService StaffService
+@inject ICurrentUser CurrentUser
+
+<h1>Access Management</h1>
+
+@if (!CurrentUser.HasPermission("Admin.ManageRoleGroups") && !CurrentUser.HasPermission("Admin.ManageUsers"))
+{
+    <p class="stat-sub">You don't have permission to view this page.</p>
+}
+else
+{
+    <div class="filter-tabs" style="margin-bottom: 18px; width: fit-content;">
+        @if (CurrentUser.HasPermission("Admin.ManageRoleGroups"))
+        {
+            <button class="filter-tab @(_tab == "roleGroups" ? "active" : "")" @onclick='() => _tab = "roleGroups"'>Role Groups</button>
+            <button class="filter-tab @(_tab == "roles" ? "active" : "")" @onclick='() => _tab = "roles"'>Roles</button>
+        }
+        @if (CurrentUser.HasPermission("Admin.ManageUsers"))
+        {
+            <button class="filter-tab @(_tab == "members" ? "active" : "")" @onclick='() => _tab = "members"'>Members</button>
+        }
+        <button class="filter-tab @(_tab == "mine" ? "active" : "")" @onclick='() => _tab = "mine"'>My Permissions</button>
+    </div>
+
+    @* ==================== ROLE GROUPS ==================== *@
+    @if (_tab == "roleGroups" && CurrentUser.HasPermission("Admin.ManageRoleGroups"))
+    {
+        <div class="toolbar" style="justify-content: space-between;">
+            <button class="primary" @onclick="OpenCreateRoleGroup"><Icon Name="plus" Size="16" /> Create role group</button>
+            <span class="stat-sub">@_roleGroups.Count item(s)</span>
+        </div>
+
+        @if (_loadingRoles)
+        {
+            <p class="stat-sub">Loading…</p>
+        }
+        else
+        {
+            <div class="table-scroll">
+            <table class="grid">
+                <thead>
+                    <tr>
+                        <th>Role Group Name</th>
+                        <th>Description</th>
+                        <th style="width: 90px">Built-in</th>
+                        <th>Roles</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var g in _roleGroups)
+                    {
+                        <tr @onclick="() => OpenRoleGroupDrawer(g)" style="cursor: pointer;">
+                            <td>@g.Name</td>
+                            <td class="stat-sub">@g.Description</td>
+                            <td>@(g.IsSystemDefined ? "Yes" : "No")</td>
+                            <td>@g.Permissions.Count</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            </div>
+        }
+    }
+
+    @* ==================== ROLES (reference list) ==================== *@
+    @if (_tab == "roles" && CurrentUser.HasPermission("Admin.ManageRoleGroups"))
+    {
+        <p class="stat-sub" style="margin-bottom: 14px;">
+            Every role the app actually checks for, anywhere. This list is fixed — each one corresponds to a real
+            enforcement point in the code, so a role can't be invented here without a matching code change to make it
+            do anything. What you can customize freely is which of these get bundled into which Role Group.
+        </p>
+        <div class="table-scroll">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th>Role Name</th>
+                    <th style="width: 160px">Category</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in PermissionCatalog.All)
+                {
+                    <tr>
+                        <td>@p.DisplayName</td>
+                        <td class="stat-sub">@p.Category</td>
+                        <td class="stat-sub">@(p.Description ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+
+    @* ==================== MEMBERS ==================== *@
+    @if (_tab == "members" && CurrentUser.HasPermission("Admin.ManageUsers"))
+    {
+        <div class="toolbar" style="justify-content: space-between;">
+            <button class="primary" @onclick="OpenCreateUser"><Icon Name="plus" Size="16" /> Add member</button>
+            <span class="stat-sub">@_userAccounts.Count item(s)</span>
+        </div>
+
+        @if (_loadingUsers)
+        {
+            <p class="stat-sub">Loading…</p>
+        }
+        else
+        {
+            <div class="table-scroll">
+            <table class="grid">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Login method</th>
+                        <th>Role group</th>
+                        <th>Expires</th>
+                        <th>Linked staff</th>
+                        <th>Last login</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in _userAccounts)
+                    {
+                        var isExpired = u.RoleGroupExpiresAtUtc.HasValue && u.RoleGroupExpiresAtUtc.Value < DateTime.UtcNow;
+                        <tr @onclick="() => OpenUserDrawer(u)" style="cursor: pointer;">
+                            <td>@u.DisplayName
+                                @if (!u.IsActive)
+                                {
+                                    <span class="badge pending" style="margin-left: 6px;">Inactive</span>
+                                }
+                            </td>
+                            <td class="stat-sub">
+                                @if (!string.IsNullOrEmpty(u.EntraUpn)) { @("Entra: " + u.EntraUpn) }
+                                else if (!string.IsNullOrEmpty(u.EntraObjectId)) { @("Entra ID (auto-provisioned)") }
+                                @if (u.LocalLoginEnabled) { <span>@(string.IsNullOrEmpty(u.EntraUpn) && string.IsNullOrEmpty(u.EntraObjectId) ? "" : " + ")Local: @u.LocalUsername</span> }
+                            </td>
+                            <td class="stat-sub">@RoleGroupName(u.RoleGroupId)</td>
+                            <td class="stat-sub">
+                                @if (u.RoleGroupExpiresAtUtc.HasValue)
+                                {
+                                    <span style="@(isExpired ? "color: var(--danger);" : "")">@u.RoleGroupExpiresAtUtc.Value.ToString("dd MMM yyyy")@(isExpired ? " (expired)" : "")</span>
+                                }
+                                else
+                                {
+                                    <span>Never</span>
+                                }
+                            </td>
+                            <td class="stat-sub">@(u.StaffId.HasValue ? StaffName(u.StaffId.Value) : "—")</td>
+                            <td class="stat-sub">@(u.LastLoginAtUtc?.ToString("dd MMM yyyy, hh:mm tt") ?? "Never")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            </div>
+        }
+    }
+
+    @* ==================== MY PERMISSIONS ==================== *@
+    @if (_tab == "mine")
+    {
+        <div class="calc-panel" style="max-width: 520px;">
+            <div class="form-row"><label>Signed in as</label><div>@CurrentUser.DisplayName</div></div>
+            <div class="form-row"><label>Role group</label><div>@(string.IsNullOrEmpty(CurrentUser.RoleGroupName) ? "— None assigned —" : CurrentUser.RoleGroupName)</div></div>
+            <div class="form-row">
+                <label>My roles</label>
+                @if (_myPermissions.Count == 0)
+                {
+                    <p class="stat-sub">No roles assigned — you may not have access to anything yet, or your assignment has expired. Contact an administrator.</p>
+                }
+                else
+                {
+                    <div style="line-height: 1.8;">
+                        @foreach (var key in _myPermissions)
+                        {
+                            var def = PermissionCatalog.Find(key);
+                            <div>@(def?.DisplayName ?? key)</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@* ==================== CREATE ROLE GROUP MODAL ==================== *@
+@if (_showCreateRoleGroupDialog)
+{
+    <div class="modal-backdrop" @onclick="() => _showCreateRoleGroupDialog = false">
+        <div class="modal wide" @onclick:stopPropagation="true">
+            <h2>Create role group</h2>
+            <div class="form-row">
+                <label>Name</label>
+                <input type="text" @bind="_newRoleGroupName" placeholder="e.g. Accounts Assistant" />
+            </div>
+            <div class="form-row">
+                <label>Description</label>
+                <input type="text" @bind="_newRoleGroupDescription" placeholder="Optional" />
+            </div>
+
+            <label style="display: block; margin: 14px 0 8px 0; font-weight: 600;">Roles</label>
+            <div style="max-height: 340px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px;">
+                @foreach (var category in PermissionCatalog.All.GroupBy(p => p.Category))
+                {
+                    <div style="margin-bottom: 12px;">
+                        <div class="stat-sub" style="font-weight: 600; margin-bottom: 6px;">@category.Key</div>
+                        @foreach (var perm in category)
+                        {
+                            <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;">
+                                <input type="checkbox" checked="@_selectedPermissions.Contains(perm.Key)"
+                                       @onchange="e => TogglePermission(_selectedPermissions, perm.Key, (bool)(e.Value ?? false))" />
+                                <span>@perm.DisplayName</span>
+                            </label>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(_roleGroupError))
+            {
+                <div class="alert danger" style="margin-top: 12px;">@_roleGroupError</div>
+            }
+
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _showCreateRoleGroupDialog = false">Cancel</button>
+                <button class="primary" @onclick="SaveNewRoleGroup" disabled="@_savingRoleGroup">@(_savingRoleGroup ? "Saving…" : "Create")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ==================== CREATE USER MODAL ==================== *@
+@if (_showUserDialog)
+{
+    <div class="modal-backdrop" @onclick="() => _showUserDialog = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Add member</h2>
+
+            <div class="form-row">
+                <label>Display name</label>
+                <input type="text" @bind="_newUser.DisplayName" placeholder="Full name" />
+            </div>
+
+            <div class="form-row">
+                <label>Link to staff profile (optional — needed for self-service)</label>
+                <select @bind="_newUserStaffId">
+                    <option value="">— None —</option>
+                    @foreach (var s in _allStaff)
+                    {
+                        <option value="@s.Id">@s.DisplayName (@s.StaffCode)</option>
+                    }
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Role group</label>
+                <select @bind="_newUserRoleGroupId">
+                    @foreach (var g in _roleGroups)
+                    {
+                        <option value="@g.Id">@g.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Expiration date (optional)</label>
+                <input type="date" @bind="_newUserExpiryDate" min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+            </div>
+
+            <div class="form-row">
+                <label>Entra ID UPN (optional — e.g. name@school.onmicrosoft.com)</label>
+                <input type="text" @bind="_newUser.EntraUpn" placeholder="Leave blank if not using Entra sign-in" />
+            </div>
+
+            <div class="form-row">
+                <label>
+                    <input type="checkbox" @bind="_newUserLocalLoginEnabled" style="width: auto; margin-right: 6px;" />
+                    Enable local login (emergency fallback)
+                </label>
+            </div>
+
+            @if (_newUserLocalLoginEnabled)
+            {
+                <div class="form-row">
+                    <label>Local username</label>
+                    <input type="text" @bind="_newUser.LocalUsername" placeholder="e.g. officeadmin2" />
+                </div>
+                <div class="form-row">
+                    <label>Local password</label>
+                    <input type="password" @bind="_newUserLocalPassword" placeholder="At least 8 characters" />
+                </div>
+            }
+
+            @if (!NewUserIsValid && !string.IsNullOrWhiteSpace(_newUser.DisplayName))
+            {
+                <div class="alert warning">
+                    @if (string.IsNullOrWhiteSpace(_newUser.EntraUpn) && !_newUserLocalLoginEnabled)
+                    {
+                        <span>This account needs a way to sign in — enter an Entra UPN, or enable local login, before it can be saved.</span>
+                    }
+                    else if (_newUserLocalLoginEnabled)
+                    {
+                        <span>Local login needs both a username and a password of at least 8 characters.</span>
+                    }
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_userError))
+            {
+                <div class="alert danger" style="margin-top: 12px;">@_userError</div>
+            }
+
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _showUserDialog = false">Cancel</button>
+                <button class="primary" @onclick="SaveUser" disabled="@(_savingUser || !NewUserIsValid)">@(_savingUser ? "Saving…" : "Add member")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ==================== MEMBER (USER) DETAIL DRAWER ==================== *@
+@if (_drawerUser != null)
+{
+    <div class="drawer-backdrop" @onclick="() => _drawerUser = null"></div>
+    <div class="drawer">
+        <div class="drawer-header">
+            <div class="drawer-identity">
+                <div>
+                    <h2 style="margin: 0;">@_drawerUser.DisplayName</h2>
+                    @if (!_drawerUser.IsActive)
+                    {
+                        <span class="badge pending" style="margin-top: 4px;">Inactive</span>
+                    }
+                </div>
+            </div>
+            <button class="icon-btn" @onclick="() => _drawerUser = null"><Icon Name="x" /></button>
+        </div>
+        <div class="drawer-body">
+            <div class="form-row">
+                <label>Name</label>
+                <input type="text" @bind="_drawerName" />
+            </div>
+            <div class="form-row">
+                <label>Entra ID UPN</label>
+                <input type="text" @bind="_drawerEntraUpn" placeholder="e.g. name@school.onmicrosoft.com" />
+            </div>
+            <div class="form-row">
+                <label>Entra ID Object ID</label>
+                <input type="text" @bind="_drawerEntraObjectId" placeholder="Leave blank if not using Entra sign-in" />
+                <p class="stat-sub" style="margin-top: 4px;">Change this if you're moving this account to a different Entra tenant — the Object ID is tenant-specific, so a new app registration in a new tenant means a new value here. Leave blank to have it fill in automatically on next sign-in instead.</p>
+            </div>
+            <div class="form-row">
+                <label>
+                    <input type="checkbox" @bind="_drawerLocalLoginEnabled" style="width: auto; margin-right: 6px;" />
+                    Local login enabled (emergency fallback)
+                </label>
+            </div>
+            @if (_drawerLocalLoginEnabled)
+            {
+                <div class="form-row">
+                    <label>Local username</label>
+                    <input type="text" @bind="_drawerLocalUsername" placeholder="e.g. officeadmin" />
+                </div>
+                <div class="form-row">
+                    <label>Reset password</label>
+                    <input type="password" @bind="_drawerNewLocalPassword" placeholder="Leave blank to keep the current password" />
+                    <p class="stat-sub" style="margin-top: 4px;">At least 8 characters. Only applied if you type something here.</p>
+                </div>
+            }
+            <div class="form-row">
+                <label>Linked staff profile</label>
+                <select @bind="_drawerStaffId">
+                    <option value="">— None —</option>
+                    @foreach (var s in _allStaff)
+                    {
+                        <option value="@s.Id">@s.DisplayName (@s.StaffCode)</option>
+                    }
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Role group</label>
+                <select @bind="_drawerRoleGroupId">
+                    @foreach (var g in _roleGroups)
+                    {
+                        <option value="@g.Id">@g.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Expiration date (optional)</label>
+                <input type="date" @bind="_drawerExpiryDate" />
+            </div>
+
+            <label style="display: block; margin: 14px 0 6px 0; font-weight: 600;">Roles from this role group</label>
+            <div class="stat-sub" style="line-height: 1.8;">
+                @{
+                    var group = _roleGroups.FirstOrDefault(g => g.Id == _drawerUser.RoleGroupId);
+                }
+                @if (group == null || group.Permissions.Count == 0)
+                {
+                    <div>No roles assigned.</div>
+                }
+                else
+                {
+                    @foreach (var perm in group.Permissions)
+                    {
+                        var def = PermissionCatalog.Find(perm.PermissionKey);
+                        <div>@(def?.DisplayName ?? perm.PermissionKey)</div>
+                    }
+                }
+            </div>
+
+            <div class="form-row" style="margin-top: 18px;">
+                <label>Account history</label>
+                <div class="stat-sub">
+                    Created @_drawerUser.CreatedAtUtc.ToString("dd MMM yyyy") by @_drawerUser.CreatedByDisplayName<br />
+                    Last login: @(_drawerUser.LastLoginAtUtc?.ToString("dd MMM yyyy, hh:mm tt") ?? "Never")
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_drawerError))
+            {
+                <div class="alert danger" style="margin-top: 12px;">@_drawerError</div>
+            }
+        </div>
+        <div class="drawer-footer" style="flex-wrap: wrap;">
+            @if (_drawerUser.IsActive)
+            {
+                <button class="danger" @onclick="DeactivateDrawerUser">Deactivate</button>
+            }
+            else
+            {
+                <button class="secondary" @onclick="ReactivateDrawerUser">Reactivate</button>
+            }
+            <button class="danger" @onclick="ConfirmDeleteDrawerUser">Delete member</button>
+            <span style="flex: 1;"></span>
+            <button class="secondary" @onclick="() => _drawerUser = null">Cancel</button>
+            <button class="primary" @onclick="SaveDrawerUser">Save</button>
+        </div>
+    </div>
+}
+
+@* ==================== DELETE MEMBER CONFIRM ==================== *@
+@if (_confirmDeleteUser != null)
+{
+    <div class="modal-backdrop" @onclick="() => _confirmDeleteUser = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Delete "@_confirmDeleteUser.DisplayName"?</h2>
+            <p class="modal-body">This permanently removes the account. This can't be undone — if you just want to disable access, use Deactivate instead.</p>
+            @if (!string.IsNullOrEmpty(_drawerError))
+            {
+                <div class="alert danger">@_drawerError</div>
+            }
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => { _confirmDeleteUser = null; _drawerError = null; }">Cancel</button>
+                <button class="primary" style="background: var(--danger); border-color: var(--danger);" @onclick="DeleteDrawerUser">Delete permanently</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ==================== ROLE GROUP DETAIL DRAWER ==================== *@
+@if (_drawerRoleGroup != null)
+{
+    <div class="drawer-backdrop" @onclick="() => _drawerRoleGroup = null"></div>
+    <div class="drawer">
+        <div class="drawer-header">
+            <div class="drawer-identity">
+                <div>
+                    <h2 style="margin: 0;">@_drawerRoleGroup.Name</h2>
+                    @if (_drawerRoleGroup.IsSystemDefined)
+                    {
+                        <span class="badge" style="margin-top: 4px;">Built-in</span>
+                    }
+                </div>
+            </div>
+            <button class="icon-btn" @onclick="() => _drawerRoleGroup = null"><Icon Name="x" /></button>
+        </div>
+        <div class="drawer-tabs">
+            <button class="drawer-tab @(_rgTab == "basics" ? "active" : "")" @onclick='() => _rgTab = "basics"'>Basics</button>
+            <button class="drawer-tab @(_rgTab == "roles" ? "active" : "")" @onclick='() => _rgTab = "roles"'>Roles</button>
+            <button class="drawer-tab @(_rgTab == "members" ? "active" : "")" @onclick='() => _rgTab = "members"'>Members</button>
+        </div>
+        <div class="drawer-body">
+            @if (_rgTab == "basics")
+            {
+                <div class="form-row">
+                    <label>Name</label>
+                    <input type="text" @bind="_rgName" disabled="@_drawerRoleGroup.IsSystemDefined" />
+                </div>
+                <div class="form-row">
+                    <label>Description</label>
+                    <input type="text" @bind="_rgDescription" disabled="@_drawerRoleGroup.IsSystemDefined" />
+                </div>
+                @if (_drawerRoleGroup.IsSystemDefined)
+                {
+                    <p class="stat-sub">Built-in role groups can't be renamed or removed, to keep at least one safety-net administrator role always available.</p>
+                }
+            }
+            else if (_rgTab == "roles")
+            {
+                @if (_drawerRoleGroup.IsSystemDefined)
+                {
+                    <p class="stat-sub" style="margin-bottom: 12px;">Built-in role groups have a fixed set of roles.</p>
+                }
+                <div style="max-height: 340px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px;">
+                    @foreach (var category in PermissionCatalog.All.GroupBy(p => p.Category))
+                    {
+                        <div style="margin-bottom: 12px;">
+                            <div class="stat-sub" style="font-weight: 600; margin-bottom: 6px;">@category.Key</div>
+                            @foreach (var perm in category)
+                            {
+                                <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;">
+                                    <input type="checkbox" checked="@_rgSelectedPermissions.Contains(perm.Key)" disabled="@_drawerRoleGroup.IsSystemDefined"
+                                           @onchange="e => TogglePermission(_rgSelectedPermissions, perm.Key, (bool)(e.Value ?? false))" />
+                                    <span>@perm.DisplayName</span>
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            else if (_rgTab == "members")
+            {
+                var members = _userAccounts.Where(u => u.RoleGroupId == _drawerRoleGroup.Id).ToList();
+                <div class="toolbar">
+                    <button class="secondary" @onclick="() => { _drawerRoleGroup = null; OpenCreateUser(); }">Add member</button>
+                </div>
+                @if (members.Count == 0)
+                {
+                    <p class="stat-sub">No members in this role group.</p>
+                }
+                else
+                {
+                    <table class="grid">
+                        <thead><tr><th>Name</th><th>Expires</th><th style="width: 90px"></th></tr></thead>
+                        <tbody>
+                            @foreach (var m in members)
+                            {
+                                <tr>
+                                    <td>@m.DisplayName</td>
+                                    <td class="stat-sub">@(m.RoleGroupExpiresAtUtc?.ToString("dd MMM yyyy") ?? "Never")</td>
+                                    <td><button class="icon-btn" title="Edit member" @onclick="() => { _drawerRoleGroup = null; OpenUserDrawer(m); }"><Icon Name="pencil" Size="14" /></button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+
+            @if (!string.IsNullOrEmpty(_rgError))
+            {
+                <div class="alert danger" style="margin-top: 12px;">@_rgError</div>
+            }
+        </div>
+        <div class="drawer-footer">
+            @if (!_drawerRoleGroup.IsSystemDefined)
+            {
+                <button class="danger" @onclick="() => { _confirmDeleteRoleGroup = _drawerRoleGroup; _drawerRoleGroup = null; }">Delete</button>
+            }
+            <span style="flex: 1;"></span>
+            <button class="secondary" @onclick="() => _drawerRoleGroup = null">Cancel</button>
+            <button class="primary" @onclick="SaveRoleGroupDrawer" disabled="@_drawerRoleGroup.IsSystemDefined">Save</button>
+        </div>
+    </div>
+}
+
+@* ==================== DELETE ROLE GROUP CONFIRM ==================== *@
+@if (_confirmDeleteRoleGroup != null)
+{
+    <div class="modal-backdrop" @onclick="() => _confirmDeleteRoleGroup = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Delete "@_confirmDeleteRoleGroup.Name"?</h2>
+            <p class="modal-body">This can't be undone. If any members are still assigned to this role group, deletion will be blocked until they're reassigned.</p>
+            @if (!string.IsNullOrEmpty(_rgError))
+            {
+                <div class="alert danger">@_rgError</div>
+            }
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _confirmDeleteRoleGroup = null">Cancel</button>
+                <button class="primary" style="background: var(--danger); border-color: var(--danger);" @onclick="DeleteRoleGroupConfirmed">Delete permanently</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _tab = "roleGroups";
+
+    private bool _loadingRoles = true;
+    private List<RoleGroup> _roleGroups = new();
+
+    private bool _loadingUsers = true;
+    private List<UserAccount> _userAccounts = new();
+    private List<Staff> _allStaff = new();
+    private List<string> _myPermissions = new();
+
+    // ---- Create role group ----
+    private bool _showCreateRoleGroupDialog;
+    private string _newRoleGroupName = "";
+    private string _newRoleGroupDescription = "";
+    private HashSet<string> _selectedPermissions = new();
+    private bool _savingRoleGroup;
+    private string? _roleGroupError;
+
+    // ---- Create user ----
+    private bool _showUserDialog;
+    private UserAccount _newUser = new();
+    private string _newUserStaffId = "";
+    private Guid _newUserRoleGroupId;
+    private bool _newUserLocalLoginEnabled;
+    private string _newUserLocalPassword = "";
+    private DateTime? _newUserExpiryDate;
+
+    private bool NewUserIsValid
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_newUser.DisplayName)) return false;
+            if (_newUserRoleGroupId == Guid.Empty) return false;
+            var hasEntra = !string.IsNullOrWhiteSpace(_newUser.EntraUpn);
+            var hasValidLocal = _newUserLocalLoginEnabled
+                && !string.IsNullOrWhiteSpace(_newUser.LocalUsername)
+                && _newUserLocalPassword.Length >= 8;
+            if (_newUserLocalLoginEnabled && !hasValidLocal) return false; // checked but incomplete - block regardless of Entra
+            return hasEntra || hasValidLocal;
+        }
+    }
+    private bool _savingUser;
+    private string? _userError;
+
+    // ---- Member detail drawer ----
+    private UserAccount? _drawerUser;
+    private string _drawerName = "";
+    private string _drawerStaffId = "";
+    private string _drawerEntraUpn = "";
+    private string _drawerEntraObjectId = "";
+    private bool _drawerLocalLoginEnabled;
+    private string _drawerLocalUsername = "";
+    private string _drawerNewLocalPassword = "";
+    private Guid _drawerRoleGroupId;
+    private DateTime? _drawerExpiryDate;
+    private string? _drawerError;
+    private UserAccount? _confirmDeleteUser;
+
+    // ---- Role group detail drawer ----
+    private RoleGroup? _drawerRoleGroup;
+    private string _rgTab = "basics";
+    private string _rgName = "";
+    private string _rgDescription = "";
+    private HashSet<string> _rgSelectedPermissions = new();
+    private string? _rgError;
+    private RoleGroup? _confirmDeleteRoleGroup;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.HasPermission("Admin.ManageRoleGroups") && !CurrentUser.HasPermission("Admin.ManageUsers"))
+            return;
+
+        _tab = CurrentUser.HasPermission("Admin.ManageRoleGroups") ? "roleGroups" : "members";
+        _allStaff = await StaffService.ListActiveAsync();
+        await ReloadRoleGroupsAsync();
+        await ReloadUsersAsync();
+
+        var mine = _roleGroups.FirstOrDefault(g => g.Name == CurrentUser.RoleGroupName);
+        _myPermissions = mine?.Permissions.Select(p => p.PermissionKey).OrderBy(k => k).ToList() ?? new();
+    }
+
+    private async Task ReloadRoleGroupsAsync()
+    {
+        _loadingRoles = true;
+        _roleGroups = await UserAccountService.ListRoleGroupsAsync();
+        _loadingRoles = false;
+    }
+
+    private async Task ReloadUsersAsync()
+    {
+        _loadingUsers = true;
+        _userAccounts = await UserAccountService.ListUsersAsync();
+        _loadingUsers = false;
+    }
+
+    private string RoleGroupName(Guid id) => _roleGroups.FirstOrDefault(g => g.Id == id)?.Name ?? "—";
+    private string StaffName(Guid staffId) => _allStaff.FirstOrDefault(s => s.Id == staffId)?.DisplayName ?? "—";
+
+    // Shared toggle helper used by both permission checkbox lists.
+    private void TogglePermission(HashSet<string> selected, string key, bool isChecked)
+    {
+        if (isChecked) selected.Add(key);
+        else selected.Remove(key);
+    }
+
+    // ---- Create role group ----
+    private void OpenCreateRoleGroup()
+    {
+        _newRoleGroupName = "";
+        _newRoleGroupDescription = "";
+        _selectedPermissions = new();
+        _roleGroupError = null;
+        _showCreateRoleGroupDialog = true;
+    }
+
+    private async Task SaveNewRoleGroup()
+    {
+        _roleGroupError = null;
+        if (string.IsNullOrWhiteSpace(_newRoleGroupName))
+        {
+            _roleGroupError = "Name is required.";
+            return;
+        }
+        try
+        {
+            _savingRoleGroup = true;
+            await UserAccountService.CreateRoleGroupAsync(_newRoleGroupName.Trim(), _newRoleGroupDescription, _selectedPermissions.ToList());
+            _showCreateRoleGroupDialog = false;
+            await ReloadRoleGroupsAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _roleGroupError = ex.Message;
+        }
+        finally
+        {
+            _savingRoleGroup = false;
+        }
+    }
+
+    // ---- Create user ----
+    private void OpenCreateUser()
+    {
+        _newUser = new UserAccount();
+        _newUserStaffId = "";
+        _newUserRoleGroupId = _roleGroups.FirstOrDefault(g => g.Name == "Regular Staff")?.Id ?? _roleGroups.FirstOrDefault()?.Id ?? Guid.Empty;
+        _newUserLocalLoginEnabled = false;
+        _newUserLocalPassword = "";
+        _newUserExpiryDate = null;
+        _userError = null;
+        _showUserDialog = true;
+    }
+
+    private async Task SaveUser()
+    {
+        _userError = null;
+        if (string.IsNullOrWhiteSpace(_newUser.DisplayName))
+        {
+            _userError = "Display name is required.";
+            return;
+        }
+        if (_newUserLocalLoginEnabled && (string.IsNullOrWhiteSpace(_newUser.LocalUsername) || _newUserLocalPassword.Length < 8))
+        {
+            _userError = "Local login needs a username and a password of at least 8 characters.";
+            return;
+        }
+        if (_newUserRoleGroupId == Guid.Empty)
+        {
+            _userError = "Choose a role group.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_newUser.EntraUpn) && !_newUserLocalLoginEnabled)
+        {
+            _userError = "This account needs a way to sign in — enter an Entra UPN, or enable local login.";
+            return;
+        }
+
+        try
+        {
+            _savingUser = true;
+            _newUser.RoleGroupId = _newUserRoleGroupId;
+            _newUser.RoleGroupExpiresAtUtc = _newUserExpiryDate?.ToUniversalTime();
+            _newUser.LocalLoginEnabled = _newUserLocalLoginEnabled;
+            _newUser.StaffId = Guid.TryParse(_newUserStaffId, out var sid) ? sid : null;
+            _newUser.EntraUpn = string.IsNullOrWhiteSpace(_newUser.EntraUpn) ? null : _newUser.EntraUpn.Trim();
+            _newUser.LocalUsername = _newUserLocalLoginEnabled ? _newUser.LocalUsername?.Trim() : null;
+
+            await UserAccountService.CreateUserAccountAsync(_newUser, _newUserLocalLoginEnabled ? _newUserLocalPassword : null);
+            _showUserDialog = false;
+            await ReloadUsersAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _userError = ex.Message;
+        }
+        finally
+        {
+            _savingUser = false;
+        }
+    }
+
+    // ---- Member detail drawer ----
+    private void OpenUserDrawer(UserAccount u)
+    {
+        _drawerUser = u;
+        _drawerName = u.DisplayName;
+        _drawerStaffId = u.StaffId?.ToString() ?? "";
+        _drawerEntraUpn = u.EntraUpn ?? "";
+        _drawerEntraObjectId = u.EntraObjectId ?? "";
+        _drawerLocalLoginEnabled = u.LocalLoginEnabled;
+        _drawerLocalUsername = u.LocalUsername ?? "";
+        _drawerNewLocalPassword = "";
+        _drawerRoleGroupId = u.RoleGroupId;
+        _drawerExpiryDate = u.RoleGroupExpiresAtUtc?.ToLocalTime().Date;
+        _drawerError = null;
+    }
+
+    private async Task SaveDrawerUser()
+    {
+        if (_drawerUser == null) return;
+        _drawerError = null;
+
+        if (_drawerLocalLoginEnabled && string.IsNullOrWhiteSpace(_drawerLocalUsername))
+        {
+            _drawerError = "Local login is enabled but has no username set.";
+            return;
+        }
+        if (!string.IsNullOrEmpty(_drawerNewLocalPassword) && _drawerNewLocalPassword.Length < 8)
+        {
+            _drawerError = "New password must be at least 8 characters — leave it blank to keep the current one.";
+            return;
+        }
+
+        try
+        {
+            var staffId = Guid.TryParse(_drawerStaffId, out var sid) ? sid : (Guid?)null;
+            await UserAccountService.UpdateUserAccountDetailsAsync(_drawerUser.Id, _drawerName, staffId,
+                string.IsNullOrWhiteSpace(_drawerEntraUpn) ? null : _drawerEntraUpn.Trim(),
+                string.IsNullOrWhiteSpace(_drawerEntraObjectId) ? null : _drawerEntraObjectId.Trim(),
+                _drawerLocalLoginEnabled,
+                _drawerLocalLoginEnabled ? _drawerLocalUsername.Trim() : null);
+            if (!string.IsNullOrEmpty(_drawerNewLocalPassword))
+                await UserAccountService.SetLocalPasswordAsync(_drawerUser.Id, _drawerNewLocalPassword);
+            await UserAccountService.AssignRoleGroupAsync(_drawerUser.Id, _drawerRoleGroupId, _drawerExpiryDate?.ToUniversalTime());
+            await ReloadRoleGroupsAsync();
+            await ReloadUsersAsync();
+            _drawerUser = null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _drawerError = ex.Message;
+        }
+    }
+
+    private async Task DeactivateDrawerUser()
+    {
+        if (_drawerUser == null) return;
+        try
+        {
+            await UserAccountService.DeactivateUserAccountAsync(_drawerUser.Id);
+            await ReloadUsersAsync();
+            _drawerUser = _userAccounts.FirstOrDefault(u => u.Id == _drawerUser.Id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _drawerError = ex.Message;
+        }
+    }
+
+    private async Task ReactivateDrawerUser()
+    {
+        if (_drawerUser == null) return;
+        await UserAccountService.ReactivateUserAccountAsync(_drawerUser.Id);
+        await ReloadUsersAsync();
+        _drawerUser = _userAccounts.FirstOrDefault(u => u.Id == _drawerUser.Id);
+    }
+
+    private void ConfirmDeleteDrawerUser()
+    {
+        if (_drawerUser == null) return;
+        _confirmDeleteUser = _drawerUser;
+        _drawerUser = null;
+    }
+
+    private async Task DeleteDrawerUser()
+    {
+        if (_confirmDeleteUser == null) return;
+        _drawerError = null;
+        try
+        {
+            await UserAccountService.DeleteUserAccountAsync(_confirmDeleteUser.Id);
+            _confirmDeleteUser = null;
+            _drawerUser = null;
+            await ReloadUsersAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Stay on the small confirm popup - that's where the alert above
+            // now actually shows this, immediately visible with no scrolling.
+            _drawerError = ex.Message;
+        }
+    }
+
+    // ---- Role group detail drawer ----
+    private void OpenRoleGroupDrawer(RoleGroup g)
+    {
+        _drawerRoleGroup = g;
+        _rgTab = "basics";
+        _rgName = g.Name;
+        _rgDescription = g.Description ?? "";
+        _rgSelectedPermissions = g.Permissions.Select(p => p.PermissionKey).ToHashSet();
+        _rgError = null;
+    }
+
+    private async Task SaveRoleGroupDrawer()
+    {
+        if (_drawerRoleGroup == null || _drawerRoleGroup.IsSystemDefined) return;
+        _rgError = null;
+        try
+        {
+            await UserAccountService.UpdateRoleGroupBasicsAsync(_drawerRoleGroup.Id, _rgName.Trim(), _rgDescription);
+            await UserAccountService.UpdateRoleGroupPermissionsAsync(_drawerRoleGroup.Id, _rgSelectedPermissions.ToList());
+            await ReloadRoleGroupsAsync();
+            _drawerRoleGroup = null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _rgError = ex.Message;
+        }
+    }
+
+    private async Task DeleteRoleGroupConfirmed()
+    {
+        if (_confirmDeleteRoleGroup == null) return;
+        _rgError = null;
+        try
+        {
+            await UserAccountService.DeleteRoleGroupAsync(_confirmDeleteRoleGroup.Id);
+            _confirmDeleteRoleGroup = null;
+            _drawerRoleGroup = null;
+            await ReloadRoleGroupsAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _rgError = ex.Message;
+        }
+    }
+}

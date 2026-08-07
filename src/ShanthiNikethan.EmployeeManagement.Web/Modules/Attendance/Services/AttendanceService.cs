@@ -11,7 +11,7 @@ public record DailyTotals(int PresentM, int AbsentM, int CasualLeaveM, int Leave
                            int PresentE, int AbsentE, int CasualLeaveE, int LeaveE);
 
 public record StaffMonthlyTotal(Guid StaffId, string StaffDisplayName, string StaffCode,
-                                 int WorkingDays, decimal DaysPresent, decimal CasualLeaveDays, decimal LeaveDays);
+                                 int WorkingDays, decimal DaysPresent, decimal AbsentDays, decimal CasualLeaveDays, decimal LeaveDays);
 
 public interface IAttendanceService
 {
@@ -192,13 +192,10 @@ public class AttendanceService : IAttendanceService
             oldValue: oldValue, newValue: $"M:{morning} E:{evening}",
             context: $"{existing.StaffDisplayName} — {date:dd MMM yyyy}", ct: ct);
 
-        // Bi-directional sync: reflect a Leave marking (full or half-day)
-        // back into the Leave module, so both modules show the same
-        // picture regardless of which one someone marked it in first.
-        var leaveDayFraction =
-            (morning == AttendanceStatus.Leave ? 0.5m : 0m) +
-            (evening == AttendanceStatus.Leave ? 0.5m : 0m);
-        await _leaveService.SyncFromAttendanceAsync(staffId, date, leaveDayFraction, ct);
+        // Bi-directional sync: reflect Absent, Casual Leave, or Leave back
+        // into the Leave module, so both modules show the same picture
+        // regardless of which one someone marked it in first.
+        await _leaveService.SyncFromAttendanceAsync(staffId, date, morning.ToString(), evening.ToString(), ct);
     }
 
     public async Task<int> MarkAllUnmarkedPresentAsync(DateOnly date, bool isAdminOverride, CancellationToken ct = default)
@@ -297,6 +294,9 @@ public class AttendanceService : IAttendanceService
         {
             var staffRecords = records.Where(r => r.StaffId == s.Id).ToList();
             var daysPresent = staffRecords.Sum(r => r.PresentDayScore);
+            var absentDays = staffRecords.Sum(r =>
+                (r.MorningStatus == AttendanceStatus.Absent ? 0.5m : 0m) +
+                (r.EveningStatus == AttendanceStatus.Absent ? 0.5m : 0m));
             var clDays = staffRecords.Sum(r =>
                 (r.MorningStatus == AttendanceStatus.CasualLeave ? 0.5m : 0m) +
                 (r.EveningStatus == AttendanceStatus.CasualLeave ? 0.5m : 0m));
@@ -304,7 +304,7 @@ public class AttendanceService : IAttendanceService
                 (r.MorningStatus == AttendanceStatus.Leave ? 0.5m : 0m) +
                 (r.EveningStatus == AttendanceStatus.Leave ? 0.5m : 0m));
 
-            result.Add(new StaffMonthlyTotal(s.Id, s.DisplayName, s.StaffCode, workingDays, daysPresent, clDays, leaveDays));
+            result.Add(new StaffMonthlyTotal(s.Id, s.DisplayName, s.StaffCode, workingDays, daysPresent, absentDays, clDays, leaveDays));
         }
 
         return result;

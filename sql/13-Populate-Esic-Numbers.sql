@@ -16,7 +16,7 @@
 -- the SELECT at the bottom.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 UPDATE dbo.Staff SET EsicNumber = '6382747011' WHERE StaffCode = 'SNM-T-003'; -- SHANMUGAM S (confident — exact match)

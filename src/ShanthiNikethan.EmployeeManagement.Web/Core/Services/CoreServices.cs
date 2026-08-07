@@ -43,14 +43,37 @@ public interface ICurrentUser
     string DisplayName { get; }
     string ObjectId { get; }
     bool IsAuthenticated { get; }
+
+    /// <summary>The signed-in Entra ID user's UPN (e.g. name@school.onmicrosoft.com) — used to match an account an admin pre-created by UPN before this person's first login, since the admin can't know their opaque Object ID upfront.</summary>
+    string? Upn { get; }
+
+    /// <summary>True if this session authenticated via the local-credential fallback scheme rather than Entra ID.</summary>
+    bool IsLocalAuth { get; }
+
+    /// <summary>The signed-in UserAccount's own Id, once loaded — null until SetAccountContext has been called (e.g. by MainLayout on first render).</summary>
+    Guid? UserAccountId { get; }
+
+    /// <summary>The linked Staff profile's Id, for self-service filtering — null if this account isn't linked to a staff record (e.g. the two admin fallback accounts).</summary>
+    Guid? LinkedStaffId { get; }
+
+    string RoleGroupName { get; }
+
+    /// <summary>Defaults to empty until loaded — an unloaded/unrecognized session has zero permissions, never all of them.</summary>
+    bool HasPermission(string permissionKey);
+
+    void SetAccountContext(Guid userAccountId, Guid? linkedStaffId, string roleGroupName, IEnumerable<string> permissions);
 }
 
 public class CurrentUser : ICurrentUser
 {
     private readonly IHttpContextAccessor _accessor;
+    private HashSet<string> _permissions = new();
+
     public CurrentUser(IHttpContextAccessor accessor) => _accessor = accessor;
 
     public bool IsAuthenticated => _accessor.HttpContext?.User.Identity?.IsAuthenticated ?? false;
+
+    public bool IsLocalAuth => _accessor.HttpContext?.User.Identity?.AuthenticationType == "LocalAuth";
 
     public string DisplayName =>
         _accessor.HttpContext?.User.FindFirst("name")?.Value
@@ -62,6 +85,24 @@ public class CurrentUser : ICurrentUser
         _accessor.HttpContext?.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
         ?? _accessor.HttpContext?.User.FindFirst("oid")?.Value
         ?? string.Empty;
+
+    public string? Upn =>
+        _accessor.HttpContext?.User.FindFirst("preferred_username")?.Value
+        ?? _accessor.HttpContext?.User.FindFirst(ClaimTypes.Upn)?.Value;
+
+    public Guid? UserAccountId { get; private set; }
+    public Guid? LinkedStaffId { get; private set; }
+    public string RoleGroupName { get; private set; } = string.Empty;
+
+    public bool HasPermission(string permissionKey) => _permissions.Contains(permissionKey);
+
+    public void SetAccountContext(Guid userAccountId, Guid? linkedStaffId, string roleGroupName, IEnumerable<string> permissions)
+    {
+        UserAccountId = userAccountId;
+        LinkedStaffId = linkedStaffId;
+        RoleGroupName = roleGroupName;
+        _permissions = permissions.ToHashSet();
+    }
 }
 
 // ==================================================================

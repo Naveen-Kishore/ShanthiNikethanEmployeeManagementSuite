@@ -1,6 +1,11 @@
 @inherits LayoutComponentBase
-@implements IDisposable
+@implements IAsyncDisposable
 @inject NavigationManager Nav
+@inject ICurrentUser CurrentUser
+@inject IUserAccountService UserAccountService
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IJSRuntime JS
+@inject ILogger<MainLayout> Logger
 
 <div class="app-shell @(_sidebarOpen ? "" : "nav-collapsed")">
     <TopBar />
@@ -11,17 +16,140 @@
 </div>
 
 @code {
+    // Defaults to expanded, which is correct for desktop - but this same
+    // flag also drives the mobile sidebar's open/closed state (see
+    // NavigationSidebar's IsOpen parameter), where the correct default is
+    // the OPPOSITE (collapsed/icon-only). Corrected for the actual
+    // viewport on first render below, then kept correct live via a resize
+    // listener - so resizing an already-open window (not just a fresh
+    // page load) also gets fixed automatically, no refresh needed.
     private bool _sidebarOpen = true;
+    private DotNetObjectReference<MainLayout>? _dotNetRef;
 
     protected override void OnInitialized()
     {
         Nav.LocationChanged += OnLocationChanged;
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // This entire block is progressive enhancement — correct,
+            // viewport-aware sidebar behavior. It must NEVER be able to
+            // crash the circuit if it fails (e.g. a stale cached site.js
+            // missing a function, as happened once already) — worst case
+            // on failure is the sidebar keeps its desktop-oriented default,
+            // not a dead page requiring a manual reload.
+            try
+            {
+                var isMobile = await JS.InvokeAsync<bool>("siteHelpers.isMobileWidth");
+                if (isMobile && _sidebarOpen)
+                {
+                    _sidebarOpen = false;
+                    StateHasChanged();
+                }
+
+                _dotNetRef = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("siteHelpers.registerBreakpointListener", _dotNetRef);
+            }
+            catch (JSException ex)
+            {
+                Logger.LogWarning(ex, "Viewport-aware sidebar setup failed — likely a stale cached site.js. App continues with the desktop-default sidebar state.");
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit disconnected mid-setup (e.g. user navigated away
+                // instantly) - nothing to do, not an error worth logging.
+            }
+        }
+    }
+
+    /// Called from site.js only when the viewport actually crosses the
+    /// mobile/desktop breakpoint (not on every resize pixel) - resets the
+    /// sidebar to that breakpoint's natural default, same as a fresh page
+    /// load would. This intentionally overrides whatever the user had
+    /// manually toggled before crossing, matching how responsive layouts
+    /// are generally expected to behave at a breakpoint transition.
+    [JSInvokable]
+    public void OnViewportBreakpointChanged(bool isMobile)
+    {
+        _sidebarOpen = !isMobile;
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsAuthenticated || CurrentUser.UserAccountId.HasValue) return;
+
+        UserAccount? account = null;
+
+        if (CurrentUser.IsLocalAuth)
+        {
+            var claimValue = HttpContextAccessor.HttpContext?.User.FindFirst("ua_id")?.Value;
+            if (Guid.TryParse(claimValue, out var localAccountId))
+                account = await UserAccountService.GetByIdAsync(localAccountId);
+        }
+        else if (!string.IsNullOrEmpty(CurrentUser.ObjectId))
+        {
+            account = await UserAccountService.GetByEntraObjectIdAsync(CurrentUser.ObjectId);
+
+            if (account == null && !string.IsNullOrEmpty(CurrentUser.Upn))
+            {
+                account = await UserAccountService.GetByEntraUpnAsync(CurrentUser.Upn);
+                if (account != null)
+                    await UserAccountService.BackfillEntraObjectIdAsync(account.Id, CurrentUser.ObjectId);
+            }
+
+            account ??= await UserAccountService.EnsureBootstrapAdminAccountAsync(CurrentUser.ObjectId, CurrentUser.DisplayName);
+
+            // Keep the display name current on EVERY Entra login, not just
+            // the first one that created the account. This is what actually
+            // replaces a placeholder name (e.g. "Bootstrap Administrator",
+            // set before anyone had signed in yet) with the real one — the
+            // sync inside EnsureBootstrapAdminAccountAsync only runs on
+            // first-ever creation, which for a pre-created bootstrap account
+            // never coincides with an actual sign-in, so it never fired here.
+            if (account != null && !string.IsNullOrWhiteSpace(CurrentUser.DisplayName) && account.DisplayName != CurrentUser.DisplayName)
+            {
+                await UserAccountService.SyncDisplayNameAsync(account.Id, CurrentUser.DisplayName);
+                account.DisplayName = CurrentUser.DisplayName;
+            }
+        }
+
+        if (account != null)
+        {
+            var expired = account.RoleGroupExpiresAtUtc.HasValue && account.RoleGroupExpiresAtUtc.Value < DateTime.UtcNow;
+            var permissions = expired
+                ? new List<string>()
+                : await UserAccountService.GetEffectivePermissionsAsync(account.RoleGroupId);
+            var roleGroups = await UserAccountService.ListRoleGroupsAsync();
+            var roleGroupName = roleGroups.FirstOrDefault(g => g.Id == account.RoleGroupId)?.Name ?? "";
+            CurrentUser.SetAccountContext(account.Id, account.StaffId, roleGroupName, permissions);
+        }
+    }
+
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
         InvokeAsync(StateHasChanged);
 
-    private void ToggleSidebar() => _sidebarOpen = !_sidebarOpen;
+    public async ValueTask DisposeAsync()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
 
-    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+        if (_dotNetRef != null)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("siteHelpers.unregisterBreakpointListener");
+            }
+            catch (JSException) { }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone (e.g. browser tab closed) - nothing to clean up JS-side.
+            }
+            _dotNetRef.Dispose();
+        }
+    }
+
+    private void ToggleSidebar() => _sidebarOpen = !_sidebarOpen;
 }

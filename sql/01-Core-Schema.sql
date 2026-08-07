@@ -11,7 +11,7 @@ BEGIN
 END
 GO
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 -- =============================================================================

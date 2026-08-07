@@ -155,6 +155,14 @@ h3 { font-size: 15px; }
     overflow-x: hidden;
     transition: width var(--transition);
 }
+/* Icon-only mode (desktop collapsed OR mobile closed): suspend the
+   scroll/clip entirely rather than just repositioning it, since that's
+   what was clipping the hover-flyout submenu regardless of which element
+   held it (CSS forces both overflow axes to the same clipping behavior
+   whenever either is non-visible - confirmed empirically, not assumed).
+   Safe tradeoff here: the icon rail is short enough in practice that it
+   realistically never needs to scroll. */
+.app-shell.nav-collapsed .sidebar { overflow: visible; }
 .app-shell.nav-collapsed .sidebar { width: 64px; }
 .app-shell.nav-collapsed .sidebar .nav-item .nav-label { display: none; }
 .app-shell.nav-collapsed .sidebar .nav-item { justify-content: center; }
@@ -162,6 +170,7 @@ h3 { font-size: 15px; }
 .sidebar-toggle { margin: 10px 0 2px 6px; align-self: flex-start; }
 
 .sidebar-nav { flex: 1; padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.app-shell.nav-collapsed .sidebar-nav { overflow: visible; }
 
 .nav-item {
     display: flex; align-items: center; gap: 10px;
@@ -188,6 +197,69 @@ h3 { font-size: 15px; }
 .icon { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
 
 .nav-item .icon { flex-shrink: 0; }
+
+/* ---- Grouped nav (collapsible parent + indented children) ----
+   .nav-group wraps the header button + its sub-items in one element so
+   :hover/:focus-within on it can drive the icon-only flyout below, and so
+   the flyout can be positioned relative to it. Sub-items always exist in
+   the DOM now; .nav-subitems' visibility is what actually shows/hides
+   them, controlled either by the .expanded class (full-width, click-to-
+   toggle) or by hover/focus (icon-only, see RESPONSIVE + nav-collapsed
+   rules below). */
+.nav-group { position: relative; }
+.nav-group-header {
+    background: transparent; border: none; width: 100%; text-align: left; cursor: pointer;
+    font-family: inherit;
+}
+.nav-subitems { display: none; flex-direction: column; gap: 2px; }
+/* Scoped to NOT nav-collapsed specifically: a group can be auto-expanded
+   (existing logic - true whenever you're currently on one of its pages)
+   independently of whether the sidebar itself is in icon-only mode. An
+   earlier unscoped version of this rule showed sub-items inline in the
+   icon rail whenever a group was auto-expanded, even in icon-only mode -
+   with labels hidden by icon-only mode's own rules, they rendered as
+   blank, space-occupying rows. Icon-only mode must ONLY ever reveal
+   sub-items via hover/focus, regardless of expanded state. */
+.app-shell:not(.nav-collapsed) .sidebar .nav-group.expanded .nav-subitems { display: flex; }
+.nav-subitem { padding-left: 34px; font-size: 12.5px; }
+
+/* Icon-only desktop mode (sidebar manually collapsed via the hamburger
+   toggle, independent of screen size): hide the chevron entirely — with
+   no label next to it, it was crowding the group icon and reading as
+   misaligned — and reveal sub-items as a flyout panel on hover or
+   keyboard focus, rather than requiring a click at all.
+
+   Hover highlight goes edge-to-edge here (no inset, no rounded corners) —
+   matching the collapsed-rail convention used in Microsoft 365 admin
+   center's own sidebar, rather than the rounded inset pill full-width
+   mode uses. */
+.app-shell.nav-collapsed .sidebar-nav { padding-left: 0; padding-right: 0; }
+.app-shell.nav-collapsed .sidebar .nav-item { border-radius: 0; }
+.app-shell.nav-collapsed .sidebar .nav-item.active::before { left: 0; }
+.app-shell.nav-collapsed .sidebar .nav-group-header .icon:last-child {
+    display: none;
+}
+.app-shell.nav-collapsed .sidebar .nav-group:hover .nav-subitems,
+.app-shell.nav-collapsed .sidebar .nav-group:focus-within .nav-subitems {
+    display: flex;
+    position: absolute; left: 100%; top: 0; margin-left: 6px;
+    min-width: 210px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    padding: 6px;
+    z-index: 450;
+}
+.app-shell.nav-collapsed .sidebar .nav-group:hover .nav-subitems .nav-item,
+.app-shell.nav-collapsed .sidebar .nav-group:focus-within .nav-subitems .nav-item {
+    justify-content: flex-start;
+    border-radius: var(--radius-sm);
+}
+.app-shell.nav-collapsed .sidebar .nav-group:hover .nav-subitems .nav-label,
+.app-shell.nav-collapsed .sidebar .nav-group:focus-within .nav-subitems .nav-label {
+    display: inline;
+}
 
 /* ============================= TOPBAR ===================================== */
 .topbar {
@@ -256,7 +328,7 @@ button {
     padding: 8px 16px;
     font-size: 13.5px;
     font-weight: 600;
-    transition: background var(--transition), opacity var(--transition), border-color var(--transition);
+    transition: background var(--transition), color var(--transition), opacity var(--transition), border-color var(--transition);
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -447,7 +519,13 @@ input[type="checkbox"]:focus-visible {
 }
 .modal.wide { max-width: 640px; }
 .modal-body { color: var(--text-secondary); font-size: 13.5px; margin-bottom: 16px; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.modal-actions {
+    display: flex; justify-content: flex-end; gap: 10px;
+    position: sticky; bottom: -24px; margin: 20px -24px -24px -24px;
+    padding: 16px 24px; background: var(--bg-glass-solid);
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
 
 .alert { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 12.5px; margin: 14px 0; }
 .alert.warning { background: var(--warning-soft); color: var(--warning); }
@@ -556,9 +634,7 @@ input[type="checkbox"]:focus-visible {
 
 /* ============================= RESPONSIVE ==================================== */
 @media (max-width: 800px) {
-    /* Mobile always shows the icon-only rail, permanently — regardless of
-       the desktop expand/collapse toggle state. No hide/show, no overlay,
-       no backdrop needed: the rail is simply always there. */
+    /* Default (closed) state: narrow icon-only rail, same as before. */
     .sidebar,
     .app-shell.nav-collapsed .sidebar,
     .app-shell:not(.nav-collapsed) .sidebar {
@@ -568,7 +644,72 @@ input[type="checkbox"]:focus-visible {
         display: none;
     }
     .sidebar .nav-item { justify-content: center; }
-    .sidebar-toggle { display: none; }
+
+    /* Same edge-to-edge, un-rounded hover treatment as desktop icon-only
+       mode - kept consistent between the two rather than having two
+       different collapsed-rail looks. */
+    .sidebar:not(.open) .sidebar-nav { padding-left: 0; padding-right: 0; }
+    .sidebar:not(.open) .nav-item { border-radius: 0; }
+    .sidebar:not(.open) .nav-item.active::before { left: 0; }
+
+    /* Explicit guard, matching the desktop fix: a group can be auto-
+       expanded independently of the sidebar's open/closed state, so this
+       must win regardless of the .expanded class - icon-only mode never
+       shows sub-items inline, only via hover/focus below. */
+    .sidebar:not(.open) .nav-group.expanded .nav-subitems { display: none; }
+
+    /* Same reasoning as the desktop nav-collapsed rule above: no label to
+       sit next to, so hide the chevron and reveal sub-items as a flyout
+       on hover/focus instead of requiring a tap-to-expand. */
+    .sidebar:not(.open) .nav-group-header .icon:last-child { display: none; }
+    /* Same clipping issue as the desktop nav-collapsed case, same fix: the
+       sidebar's own scroll/clip was cutting off the flyout regardless of
+       which ancestor held it. Confirmed empirically before shipping. */
+    .sidebar:not(.open) { overflow: visible; }
+    .sidebar:not(.open) .sidebar-nav { overflow: visible; }
+    .sidebar:not(.open) .nav-group:hover .nav-subitems,
+    .sidebar:not(.open) .nav-group:focus-within .nav-subitems {
+        display: flex;
+        position: absolute; left: 100%; top: 0; margin-left: 6px;
+        min-width: 210px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-md);
+        padding: 6px;
+        z-index: 450;
+    }
+    .sidebar:not(.open) .nav-group:hover .nav-subitems .nav-item,
+    .sidebar:not(.open) .nav-group:focus-within .nav-subitems .nav-item {
+        justify-content: flex-start;
+        border-radius: var(--radius-sm);
+    }
+    .sidebar:not(.open) .nav-group:hover .nav-subitems .nav-label,
+    .sidebar:not(.open) .nav-group:focus-within .nav-subitems .nav-label {
+        display: inline;
+    }
+
+    /* The toggle button is what lets this be reached at all — hiding it
+       removed the only way to ever see full labels or sub-items on mobile. */
+    .sidebar-toggle { display: flex; }
+
+    /* Open state: expand the SAME .sidebar element into a full overlay
+       panel, using the .open class the component already toggles. Full
+       labels return, sub-items go back to normal inline flow (overriding
+       the flyout's absolute positioning) and are shown/hidden by the
+       .expanded class exactly like full-width desktop — tap-to-toggle,
+       not hover, since this is the touch-friendly expanded view. */
+    .sidebar.open {
+        width: min(78vw, 300px);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+    .sidebar.open .nav-item .nav-label { display: inline; }
+    .sidebar.open .nav-item { justify-content: flex-start; }
+    .sidebar.open .nav-group-header .icon:last-child { display: inline-flex; }
+    .sidebar.open .nav-subitems {
+        position: static; display: none; box-shadow: none; border: none; padding: 0; margin-left: 0; min-width: 0;
+    }
+    .sidebar.open .nav-group.expanded .nav-subitems { display: flex; }
 
     .content,
     .app-shell.nav-collapsed .content,

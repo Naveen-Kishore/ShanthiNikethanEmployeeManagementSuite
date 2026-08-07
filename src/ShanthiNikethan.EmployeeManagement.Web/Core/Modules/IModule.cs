@@ -25,6 +25,12 @@ public interface IModule
     /// <summary>Sort order in the sidebar. Lower numbers appear higher.</summary>
     int NavigationOrder { get; }
 
+    /// <summary>Optional group label. Modules sharing the same GroupName cluster under one collapsible header in the sidebar instead of appearing as flat top-level items. Null (the default) means "no group, render as a normal top-level item" - existing modules need no changes to keep working exactly as before.</summary>
+    string? GroupName => null;
+
+    /// <summary>Icon for the group header itself. Only used by whichever module in a group has the lowest NavigationOrder.</summary>
+    string? GroupIcon => null;
+
     /// <summary>Register DI services required by this module.</summary>
     void RegisterServices(IServiceCollection services);
 

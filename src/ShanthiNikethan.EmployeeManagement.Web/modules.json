@@ -27,6 +27,16 @@
       "Enabled": true,
       "LicenseTier": "Base",
       "Description": "At-a-glance overview: staff composition, payroll cost trend, EPF/ESIC enrollment, leave activity, and recent changes across the system."
+    },
+    "Admin": {
+      "Enabled": true,
+      "LicenseTier": "Base",
+      "Description": "RBAC foundation — role groups, user accounts, and local-credential fallback login."
+    },
+    "IdentityProvider": {
+      "Enabled": true,
+      "LicenseTier": "Base",
+      "Description": "Current Entra ID configuration display, a config-snippet generator, and setup instructions. Grouped under Administration alongside Access Management."
     }
   }
 }

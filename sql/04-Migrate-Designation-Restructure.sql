@@ -12,7 +12,7 @@
 -- run 01, 02, 03, then 99 in order; the updated 02 already has this built in.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 -- Step 1: Add the new SubDesignation column (safe to re-run)

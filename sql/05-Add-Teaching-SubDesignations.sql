@@ -7,7 +7,7 @@
 -- "+ Add new..." option in the app) — it only inserts what's missing.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 INSERT INTO dbo.SubDesignationOption (Category, Name, DisplayOrder)

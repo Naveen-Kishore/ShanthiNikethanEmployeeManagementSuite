@@ -7,7 +7,7 @@
 -- 17 EPF-enrolled staff.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF NOT EXISTS (

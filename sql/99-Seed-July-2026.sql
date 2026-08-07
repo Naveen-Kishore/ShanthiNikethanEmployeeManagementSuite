@@ -12,7 +12,7 @@
 -- these values appear in the dropdown too.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 DECLARE @seed_actor_name NVARCHAR(200) = 'seed@import';

@@ -11,7 +11,7 @@
 -- just seeds sensible starting values.
 -- =============================================================================
 
-USE ShanthiNikethanEmployeeManagement;
+USE ShanthiNikethanEmployeeManagement_Dev;
 GO
 
 IF OBJECT_ID('dbo.SubDesignationOption', 'U') IS NOT NULL DROP TABLE dbo.SubDesignationOption;

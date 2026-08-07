@@ -2,6 +2,7 @@
 @inject IPhotoStorageService PhotoService
 @inject StatutorySalaryCalculator Calculator
 @inject IJSRuntime JS
+@inject ICurrentUser CurrentUser
 
 @if (Visible && Working != null)
 {
@@ -39,7 +40,7 @@
         </div>
 
         <div class="drawer-tabs">
-            @foreach (var tab in Tabs)
+            @foreach (var tab in VisibleTabs)
             {
                 <button class="drawer-tab @(_activeTab == tab ? "active" : "")" @onclick="() => _activeTab = tab">@tab</button>
             }
@@ -202,7 +203,7 @@
                     }
                 </div>
             }
-            else if (_activeTab == "Salary")
+            else if (_activeTab == "Salary" && CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
             {
                 <div class="alert @(Working.IsEpfEnabled || Working.IsEsicEnabled ? "success" : "warning")" style="margin-top: 0;">
                     <strong>EPF:</strong> @(Working.IsEpfEnabled ? "Enrolled (UAN on file)" : "Not enrolled — no UAN on file")
@@ -281,6 +282,8 @@
     [Parameter] public EventCallback OnSaved { get; set; }
 
     private static readonly string[] Tabs = { "Personal", "Statutory", "Banking", "Salary" };
+    private string[] VisibleTabs =>
+        CurrentUser.HasPermission("StaffDirectory.ViewFinancials") ? Tabs : Tabs.Where(t => t != "Salary").ToArray();
     private string _activeTab = "Personal";
     private bool _editMode;
     private bool _saving;

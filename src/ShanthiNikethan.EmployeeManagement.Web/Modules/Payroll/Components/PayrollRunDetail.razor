@@ -3,6 +3,7 @@
 @inject IPayrollExportService ExportService
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ICurrentUser CurrentUser
 
 @if (_run == null)
 {
@@ -269,7 +270,15 @@ else
     private decimal _nonTeachingTotal => _lineItems.Where(li => li.Designation == StaffDesignation.NonTeaching).Sum(li => li.NetPay);
     private decimal _grandTotal => _lineItems.Sum(li => li.NetPay);
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.HasPermission("Payroll.View"))
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+        await ReloadAsync();
+    }
 
     private async Task ReloadAsync()
     {

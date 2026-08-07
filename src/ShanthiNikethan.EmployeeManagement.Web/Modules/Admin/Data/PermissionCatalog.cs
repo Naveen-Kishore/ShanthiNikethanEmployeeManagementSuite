@@ -57,6 +57,10 @@ public static class PermissionCatalog
             "Create and edit member accounts, assign role groups."),
         new("Admin.ManageRoleGroups", "Manage Role Groups", "Access Management",
             "Create and edit role groups and which roles they bundle together."),
+
+        // ---- Audit Log ----
+        new("Admin.ViewAuditLog", "View Audit Log", "Audit Log",
+            "Read-only visibility into every recorded system activity - sign-ins, role changes, account changes, and other tracked actions across the app."),
     };
 
     public static PermissionDefinition? Find(string key) => All.FirstOrDefault(p => p.Key == key);

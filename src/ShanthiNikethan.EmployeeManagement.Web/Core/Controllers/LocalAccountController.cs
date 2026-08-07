@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ShanthiNikethan.EmployeeManagement.Core.Services;
 using ShanthiNikethan.EmployeeManagement.Modules.Admin.Services;
 
 namespace ShanthiNikethan.EmployeeManagement.Core.Controllers;
@@ -27,10 +28,12 @@ namespace ShanthiNikethan.EmployeeManagement.Core.Controllers;
 public class LocalAccountController : Controller
 {
     private readonly IUserAccountService _userAccountService;
+    private readonly IAuditService _audit;
 
-    public LocalAccountController(IUserAccountService userAccountService)
+    public LocalAccountController(IUserAccountService userAccountService, IAuditService audit)
     {
         _userAccountService = userAccountService;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -189,7 +192,7 @@ public class LocalAccountController : Controller
                             <span class="ms-logo"><span></span><span></span><span></span><span></span></span>
                             Sign in with Microsoft
                         </a>
-                        <button type="button" class="signin-btn" onclick="document.getElementById('fallbackChoice').style.display='none'; document.getElementById('fallbackForm').style.display='block';">
+                        <button type="button" class="signin-btn" onclick="document.getElementById('fallbackChoice').style.display='none'; document.getElementById('fallbackForm').style.display='block'; document.getElementById('fallbackUsername').focus();">
                             Sign in with fallback account
                         </button>
                     </div>
@@ -201,7 +204,7 @@ public class LocalAccountController : Controller
                             <input type="hidden" name="returnUrl" value="{{encodedReturnUrl}}" />
                             <div class="form-row">
                                 <label>Username</label>
-                                <input type="text" name="username" autocomplete="username" required autofocus />
+                                <input type="text" id="fallbackUsername" name="username" autocomplete="username" required autofocus />
                             </div>
                             <div class="form-row">
                                 <label>Password</label>
@@ -233,6 +236,14 @@ public class LocalAccountController : Controller
         var account = await _userAccountService.VerifyLocalLoginAsync(username, password);
         if (account == null)
         {
+            // Log the failed attempt against whatever username was typed -
+            // there's no real account to attribute it to, but the attempted
+            // username itself is exactly the useful signal for spotting
+            // repeated guessing against this fallback path.
+            await _audit.LogAsync("Auth", "Session", null, "SignInFailed",
+                context: $"Local sign-in failed for username \"{username}\"",
+                actorDisplayNameOverride: username, actorObjectIdOverride: "(local, unverified)");
+
             var redirectBack = "/signin?error=1";
             if (!string.IsNullOrWhiteSpace(returnUrl))
                 redirectBack += $"&returnUrl={Uri.EscapeDataString(returnUrl)}";
@@ -253,6 +264,14 @@ public class LocalAccountController : Controller
             ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8)
         });
 
+        // Explicit actor override here too: SignInAsync above doesn't
+        // retroactively update HttpContext.User for the rest of THIS
+        // request, so ICurrentUser would still report the pre-signin
+        // (anonymous) state if we relied on it instead.
+        await _audit.LogAsync("Auth", "Session", account.Id.ToString(), "SignIn",
+            context: "Local fallback account sign-in",
+            actorDisplayNameOverride: account.DisplayName, actorObjectIdOverride: $"local:{account.Id}");
+
         var target = string.IsNullOrWhiteSpace(returnUrl) || !returnUrl.StartsWith('/') ? "/" : returnUrl;
         return LocalRedirect(target);
     }
@@ -260,6 +279,7 @@ public class LocalAccountController : Controller
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
+        await _audit.LogAsync("Auth", "Session", null, "SignOut", context: "Local fallback account sign-out");
         await HttpContext.SignOutAsync("LocalAuth");
         return LocalRedirect("/signin");
     }

@@ -37,6 +37,11 @@
       "Enabled": true,
       "LicenseTier": "Base",
       "Description": "Current Entra ID configuration display, a config-snippet generator, and setup instructions. Grouped under Administration alongside Access Management."
+    },
+    "AuditLog": {
+      "Enabled": true,
+      "LicenseTier": "Base",
+      "Description": "Searchable, filterable record of system activity - sign-ins, role changes, account changes, and other tracked actions. Grouped under Administration."
     }
   }
 }

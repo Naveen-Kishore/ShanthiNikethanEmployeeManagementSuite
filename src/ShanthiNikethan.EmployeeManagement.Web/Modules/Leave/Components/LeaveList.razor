@@ -246,7 +246,7 @@ else if (_viewMode == "year")
             <div class="calc-row total"><span>Total leave in @_yearViewYear</span><span class="val">@_yearRecords.Sum(r => r.DaysCount) day(s)</span></div>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+        <div class="year-month-grid">
             @for (int m = 1; m <= 12; m++)
             {
                 var monthDate = new DateOnly(_yearViewYear, m, 1);
@@ -355,7 +355,7 @@ else
             <div class="calc-row total"><span>Total leave in @_employeeViewYear</span><span class="val">@_employeeYearRecords.Sum(r => r.DaysCount) day(s)</span></div>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+        <div class="year-month-grid">
             @for (int m = 1; m <= 12; m++)
             {
                 var monthDate = new DateOnly(_employeeViewYear, m, 1);

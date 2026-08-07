@@ -39,40 +39,62 @@ window.siteHelpers = {
     },
 
     _resizeHandler: null,
+    _orientationHandler: null,
 
     /// Watches for the viewport crossing the mobile/desktop breakpoint
     /// (not every resize pixel - only actual crossings, debounced 150ms)
     /// and calls back into Blazor so layout state can be corrected live,
     /// without needing a page refresh. dotNetRef is a DotNetObjectReference
     /// to a component exposing a [JSInvokable] OnViewportBreakpointChanged(bool).
+    ///
+    /// Also listens for orientationchange separately from resize - iOS
+    /// Safari has a well-known quirk where resize doesn't reliably fire on
+    /// rotation, and window.innerWidth can briefly report the PRE-rotation
+    /// value for a moment after orientationchange fires, so that path
+    /// re-checks after a short delay rather than trusting the immediate value.
     registerBreakpointListener: function (dotNetRef) {
         window.siteHelpers.unregisterBreakpointListener();
 
         var lastIsMobile = window.siteHelpers.isMobileWidth();
         var debounceTimer = null;
 
+        function checkAndNotify() {
+            var isMobile = window.siteHelpers.isMobileWidth();
+            if (isMobile !== lastIsMobile) {
+                lastIsMobile = isMobile;
+                dotNetRef.invokeMethodAsync('OnViewportBreakpointChanged', isMobile);
+            }
+        }
+
         function handleResize() {
             if (debounceTimer) clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(function () {
-                var isMobile = window.siteHelpers.isMobileWidth();
-                if (isMobile !== lastIsMobile) {
-                    lastIsMobile = isMobile;
-                    dotNetRef.invokeMethodAsync('OnViewportBreakpointChanged', isMobile);
-                }
-            }, 150);
+            debounceTimer = setTimeout(checkAndNotify, 150);
+        }
+
+        function handleOrientationChange() {
+            // iOS specifically: window.innerWidth can lag behind the actual
+            // new orientation for a beat, so re-check after a short delay
+            // instead of trusting the value at the moment this event fires.
+            setTimeout(checkAndNotify, 300);
         }
 
         window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', handleOrientationChange);
         window.siteHelpers._resizeHandler = handleResize;
+        window.siteHelpers._orientationHandler = handleOrientationChange;
     },
 
-    /// Removes the listener registered above — call this from the
+    /// Removes the listeners registered above — call this from the
     /// component's dispose logic so it doesn't keep firing (and keep a
     /// stale DotNetObjectReference alive) after the page/circuit is gone.
     unregisterBreakpointListener: function () {
         if (window.siteHelpers._resizeHandler) {
             window.removeEventListener('resize', window.siteHelpers._resizeHandler);
             window.siteHelpers._resizeHandler = null;
+        }
+        if (window.siteHelpers._orientationHandler) {
+            window.removeEventListener('orientationchange', window.siteHelpers._orientationHandler);
+            window.siteHelpers._orientationHandler = null;
         }
     },
 
@@ -117,6 +139,23 @@ window.siteHelpers = {
         window.siteHelpers._charts[canvasId] = new Chart(canvas, config);
     }
 };
+
+// ---- Anti-flash fix for the mobile sidebar, same pattern as theme.js ----
+// Blazor's server-rendered HTML always starts the sidebar in its "open"
+// (desktop-default) state, since the server can't know the viewport width.
+// Waiting for the Blazor circuit to connect and correct this via interop
+// (the original approach) took 2-3 real seconds on an actual device -
+// visibly showing the wrong wide layout that whole time. This script runs
+// synchronously, in document order, immediately after <Routes> has already
+// rendered that markup but BEFORE the browser's first paint - so the
+// correction happens instantly, with no visible flash, exactly like
+// theme.js already does for avoiding a flash of the wrong color theme.
+(function () {
+    if (window.innerWidth <= 800) {
+        var sidebar = document.querySelector('.sidebar');
+        if (sidebar) sidebar.classList.remove('open');
+    }
+})();
 
 // Start the auto-logout idle timer immediately — runs on every page,
 // independent of Blazor's render lifecycle.

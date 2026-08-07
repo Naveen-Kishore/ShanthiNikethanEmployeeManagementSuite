@@ -3,6 +3,7 @@
 @inject NavigationManager Nav
 @inject ICurrentUser CurrentUser
 @inject IUserAccountService UserAccountService
+@inject IAuditService AuditService
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IJSRuntime JS
 @inject ILogger<MainLayout> Logger
@@ -19,11 +20,13 @@
     // Defaults to expanded, which is correct for desktop - but this same
     // flag also drives the mobile sidebar's open/closed state (see
     // NavigationSidebar's IsOpen parameter), where the correct default is
-    // the OPPOSITE (collapsed/icon-only). Corrected for the actual
-    // viewport on first render below, then kept correct live via a resize
-    // listener - so resizing an already-open window (not just a fresh
-    // page load) also gets fixed automatically, no refresh needed.
+    // the OPPOSITE (collapsed/icon-only). The VISIBLE flash this used to
+    // cause is now fixed synchronously in site.js (same pattern as
+    // theme.js) before this component's own JS interop ever runs - what's
+    // left here is just keeping the C# state in sync with that, and
+    // reacting to live breakpoint crossings afterward.
     private bool _sidebarOpen = true;
+    private bool _isMobile;
     private DotNetObjectReference<MainLayout>? _dotNetRef;
 
     protected override void OnInitialized()
@@ -35,17 +38,18 @@
     {
         if (firstRender)
         {
-            // This entire block is progressive enhancement — correct,
-            // viewport-aware sidebar behavior. It must NEVER be able to
-            // crash the circuit if it fails (e.g. a stale cached site.js
-            // missing a function, as happened once already) — worst case
-            // on failure is the sidebar keeps its desktop-oriented default,
-            // not a dead page requiring a manual reload.
+            // Progressive enhancement - must never be able to crash the
+            // circuit if it fails (e.g. a stale cached site.js missing a
+            // function, as happened once already).
             try
             {
-                var isMobile = await JS.InvokeAsync<bool>("siteHelpers.isMobileWidth");
-                if (isMobile && _sidebarOpen)
+                _isMobile = await JS.InvokeAsync<bool>("siteHelpers.isMobileWidth");
+                if (_isMobile && _sidebarOpen)
                 {
+                    // site.js already fixed the visible DOM synchronously
+                    // before this ran - this just brings the C# state back
+                    // in sync so future Blazor-driven re-renders don't
+                    // revert it. No visible change happens here.
                     _sidebarOpen = false;
                     StateHasChanged();
                 }
@@ -66,7 +70,8 @@
     }
 
     /// Called from site.js only when the viewport actually crosses the
-    /// mobile/desktop breakpoint (not on every resize pixel) - resets the
+    /// mobile/desktop breakpoint (not on every resize pixel, and not on
+    /// every orientation change - only genuine crossings) - resets the
     /// sidebar to that breakpoint's natural default, same as a fresh page
     /// load would. This intentionally overrides whatever the user had
     /// manually toggled before crossing, matching how responsive layouts
@@ -74,6 +79,7 @@
     [JSInvokable]
     public void OnViewportBreakpointChanged(bool isMobile)
     {
+        _isMobile = isMobile;
         _sidebarOpen = !isMobile;
         StateHasChanged();
     }
@@ -126,11 +132,36 @@
             var roleGroups = await UserAccountService.ListRoleGroupsAsync();
             var roleGroupName = roleGroups.FirstOrDefault(g => g.Id == account.RoleGroupId)?.Name ?? "";
             CurrentUser.SetAccountContext(account.Id, account.StaffId, roleGroupName, permissions);
+
+            // Fires exactly once per new circuit, thanks to the UserAccountId
+            // guard at the top of this method - a page refresh from an
+            // already-authenticated session establishes a new circuit too,
+            // so this is closer to "session established" than a strict
+            // interactive re-login every time, which is what the context
+            // string below says plainly rather than overclaiming otherwise.
+            // The local-auth sign-in itself is already logged separately in
+            // LocalAccountController, at the moment the credentials are
+            // actually verified - this covers the Entra ID path, which has
+            // no equivalent single call site of its own to hook into.
+            if (!CurrentUser.IsLocalAuth)
+            {
+                await AuditService.LogAsync("Auth", "Session", account.Id.ToString(), "SignIn",
+                    context: "Entra ID session established");
+            }
         }
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
-        InvokeAsync(StateHasChanged);
+        InvokeAsync(() =>
+        {
+            // On mobile, selecting any module should return to the compact
+            // icon-only rail automatically - the expanded panel was only
+            // ever meant to be a means of picking where to go, not a
+            // permanent state.
+            if (_isMobile && _sidebarOpen)
+                _sidebarOpen = false;
+            StateHasChanged();
+        });
 
     public async ValueTask DisposeAsync()
     {

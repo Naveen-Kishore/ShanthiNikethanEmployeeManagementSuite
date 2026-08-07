@@ -1,0 +1,327 @@
+@page "/audit-log"
+@using ShanthiNikethan.EmployeeManagement.Core.Services
+@inject IAuditService AuditService
+@inject ICurrentUser CurrentUser
+
+<h1>Audit Log</h1>
+
+@if (!CurrentUser.HasPermission("Admin.ViewAuditLog"))
+{
+    <p class="stat-sub">You don't have permission to view this page.</p>
+}
+else
+{
+    <div class="card" style="padding: 18px 20px; margin-bottom: 18px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 22px;">
+            <div>
+                <div class="stat-sub" style="font-weight: 600; margin-bottom: 8px;">Date Range</div>
+                <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                    <input type="radio" name="dateRange" style="width: auto;" checked="@(_dateRangePreset == "today")" @onchange='() => SetDateRangePreset("today")' />
+                    <span>Today</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                    <input type="radio" name="dateRange" style="width: auto;" checked="@(_dateRangePreset == "last7")" @onchange='() => SetDateRangePreset("last7")' />
+                    <span>Last 7 days</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                    <input type="radio" name="dateRange" style="width: auto;" checked="@(_dateRangePreset == "last30")" @onchange='() => SetDateRangePreset("last30")' />
+                    <span>Last 30 days</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                    <input type="radio" name="dateRange" style="width: auto;" checked="@(_dateRangePreset == "thismonth")" @onchange='() => SetDateRangePreset("thismonth")' />
+                    <span>This month</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                    <input type="radio" name="dateRange" style="width: auto;" checked="@(_dateRangePreset == "custom")" @onchange='() => SetDateRangePreset("custom")' />
+                    <span>Custom range</span>
+                </label>
+                @if (_dateRangePreset == "custom")
+                {
+                    <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+                        <input type="date" @bind="_customFrom" style="font-size: 12.5px;" />
+                        <input type="date" @bind="_customTo" style="font-size: 12.5px;" />
+                    </div>
+                }
+            </div>
+
+            <div>
+                <div class="stat-sub" style="font-weight: 600; margin-bottom: 8px;">Module</div>
+                @if (_availableModules.Count == 0)
+                {
+                    <div class="stat-sub">No activity recorded yet.</div>
+                }
+                @foreach (var m in _availableModules)
+                {
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                        <input type="checkbox" style="width: auto;" checked="@_selectedModules.Contains(m)"
+                               @onchange="e => ToggleFilterValue(_selectedModules, m, (bool)(e.Value ?? false))" />
+                        <span>@m</span>
+                    </label>
+                }
+            </div>
+
+            <div>
+                <div class="stat-sub" style="font-weight: 600; margin-bottom: 8px;">Entity Type</div>
+                @foreach (var t in _availableEntityTypes)
+                {
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                        <input type="checkbox" style="width: auto;" checked="@_selectedEntityTypes.Contains(t)"
+                               @onchange="e => ToggleFilterValue(_selectedEntityTypes, t, (bool)(e.Value ?? false))" />
+                        <span>@t</span>
+                    </label>
+                }
+            </div>
+
+            <div>
+                <div class="stat-sub" style="font-weight: 600; margin-bottom: 8px;">Action</div>
+                @foreach (var a in _availableActions)
+                {
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                        <input type="checkbox" style="width: auto;" checked="@_selectedActions.Contains(a)"
+                               @onchange="e => ToggleFilterValue(_selectedActions, a, (bool)(e.Value ?? false))" />
+                        <span>@a</span>
+                    </label>
+                }
+            </div>
+        </div>
+
+        <div class="form-grid" style="margin-top: 18px;">
+            <div class="form-row">
+                <label>Actor contains</label>
+                <input type="text" @bind="_actorSearch" @bind:event="oninput" placeholder="Search by name…" />
+            </div>
+            <div class="form-row">
+                <label>Keyword (searches everything — actor, entity ID, details, context)</label>
+                <input type="text" @bind="_keyword" @bind:event="oninput" placeholder="Search details…" />
+            </div>
+        </div>
+
+        <div class="toolbar" style="margin-top: 4px; margin-bottom: 0;">
+            <button class="primary" @onclick="ApplyFiltersAsync"><Icon Name="check" Size="14" /> Apply filters</button>
+            <button class="secondary" @onclick="ClearFiltersAsync">Clear all</button>
+            @if (!_loading)
+            {
+                <span class="stat-sub">@_totalCount result(s)</span>
+            }
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="icon"><Icon Name="file-text" Size="36" /></div>
+            <p>No activity matches these filters.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-scroll">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th class="sortable" @onclick='() => SortByAsync("OccurredAtUtc")'>When@SortIndicator("OccurredAtUtc")</th>
+                    <th class="sortable" @onclick='() => SortByAsync("ActorDisplayName")'>Actor@SortIndicator("ActorDisplayName")</th>
+                    <th class="sortable" @onclick='() => SortByAsync("Module")'>Module@SortIndicator("Module")</th>
+                    <th class="sortable" @onclick='() => SortByAsync("EntityType")'>Entity Type@SortIndicator("EntityType")</th>
+                    <th class="sortable" @onclick='() => SortByAsync("Action")'>Action@SortIndicator("Action")</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in _items)
+                {
+                    <tr @onclick="() => OpenDetail(entry)" style="cursor: pointer;">
+                        <td>@entry.OccurredAtUtc.ToLocalTime().ToString("dd MMM yyyy, hh:mm:ss tt")</td>
+                        <td>@entry.ActorDisplayName</td>
+                        <td class="stat-sub">@entry.Module</td>
+                        <td class="stat-sub">@entry.EntityType</td>
+                        <td><span class="badge @ActionBadgeClass(entry.Action)">@entry.Action</span></td>
+                        <td class="stat-sub">@SummaryFor(entry)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+
+        <div class="toolbar" style="justify-content: space-between; margin-top: 14px;">
+            <span class="stat-sub">Showing @_rangeStart–@_rangeEnd of @_totalCount</span>
+            <div style="display: flex; gap: 8px;">
+                <button class="secondary" disabled="@(_page <= 1)" @onclick="() => ChangePageAsync(-1)">Previous</button>
+                <button class="secondary" disabled="@(_rangeEnd >= _totalCount)" @onclick="() => ChangePageAsync(1)">Next</button>
+            </div>
+        </div>
+    }
+}
+
+@if (_detailEntry != null)
+{
+    <div class="modal-backdrop" @onclick="() => _detailEntry = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>@_detailEntry.Action — @_detailEntry.EntityType</h2>
+            <div class="form-row"><label>When</label><div>@_detailEntry.OccurredAtUtc.ToLocalTime().ToString("dddd, dd MMM yyyy, hh:mm:ss tt")</div></div>
+            <div class="form-row"><label>Actor</label><div>@_detailEntry.ActorDisplayName <span class="stat-sub">(@_detailEntry.ActorObjectId)</span></div></div>
+            <div class="form-row"><label>Module / Entity</label><div>@_detailEntry.Module / @_detailEntry.EntityType@(string.IsNullOrEmpty(_detailEntry.EntityId) ? "" : $" ({_detailEntry.EntityId})")</div></div>
+            @if (!string.IsNullOrEmpty(_detailEntry.FieldName))
+            {
+                <div class="form-row"><label>Field changed</label><div>@_detailEntry.FieldName</div></div>
+            }
+            @if (_detailEntry.OldValue != null || _detailEntry.NewValue != null)
+            {
+                <div class="form-grid">
+                    <div class="form-row"><label>Old value</label><div class="stat-sub" style="white-space: pre-line;">@(_detailEntry.OldValue ?? "—")</div></div>
+                    <div class="form-row"><label>New value</label><div class="stat-sub" style="white-space: pre-line;">@(_detailEntry.NewValue ?? "—")</div></div>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(_detailEntry.Context))
+            {
+                <div class="form-row"><label>Context</label><div class="stat-sub" style="white-space: pre-line;">@_detailEntry.Context</div></div>
+            }
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _detailEntry = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<AuditLogEntry> _items = new();
+    private int _totalCount;
+    private int _page = 1;
+    private const int PageSize = 50;
+    private string _sortBy = "OccurredAtUtc";
+    private bool _sortDescending = true;
+
+    private string _dateRangePreset = "last7";
+    private DateTime _customFrom = DateTime.Today.AddDays(-7);
+    private DateTime _customTo = DateTime.Today;
+
+    private List<string> _availableModules = new();
+    private List<string> _availableEntityTypes = new();
+    private List<string> _availableActions = new();
+    private HashSet<string> _selectedModules = new();
+    private HashSet<string> _selectedEntityTypes = new();
+    private HashSet<string> _selectedActions = new();
+    private string _actorSearch = "";
+    private string _keyword = "";
+
+    private AuditLogEntry? _detailEntry;
+
+    private int _rangeStart => _totalCount == 0 ? 0 : (_page - 1) * PageSize + 1;
+    private int _rangeEnd => Math.Min(_page * PageSize, _totalCount);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.HasPermission("Admin.ViewAuditLog")) return;
+
+        _availableModules = await AuditService.GetDistinctModulesAsync();
+        _availableEntityTypes = await AuditService.GetDistinctEntityTypesAsync();
+        _availableActions = await AuditService.GetDistinctActionsAsync();
+
+        await LoadAsync();
+    }
+
+    // Shared toggle helper, same pattern used for permission checkboxes elsewhere in Admin Console.
+    private void ToggleFilterValue(HashSet<string> selected, string value, bool isChecked)
+    {
+        if (isChecked) selected.Add(value);
+        else selected.Remove(value);
+    }
+
+    private void SetDateRangePreset(string preset) => _dateRangePreset = preset;
+
+    private (DateTime? From, DateTime? To) ResolveDateRange()
+    {
+        var nowUtc = DateTime.UtcNow;
+        return _dateRangePreset switch
+        {
+            "today" => (DateTime.UtcNow.Date, (DateTime?)null),
+            "last7" => (nowUtc.AddDays(-7), (DateTime?)null),
+            "last30" => (nowUtc.AddDays(-30), (DateTime?)null),
+            "thismonth" => (new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc), (DateTime?)null),
+            "custom" => (DateTime.SpecifyKind(_customFrom, DateTimeKind.Utc), DateTime.SpecifyKind(_customTo.AddDays(1), DateTimeKind.Utc)),
+            _ => (null, null)
+        };
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private async Task ClearFiltersAsync()
+    {
+        _dateRangePreset = "last7";
+        _selectedModules.Clear();
+        _selectedEntityTypes.Clear();
+        _selectedActions.Clear();
+        _actorSearch = "";
+        _keyword = "";
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var (from, to) = ResolveDateRange();
+        var filter = new AuditLogSearchFilter
+        {
+            FromUtc = from,
+            ToUtc = to,
+            Modules = _selectedModules.ToList(),
+            EntityTypes = _selectedEntityTypes.ToList(),
+            Actions = _selectedActions.ToList(),
+            ActorSearch = string.IsNullOrWhiteSpace(_actorSearch) ? null : _actorSearch,
+            Keyword = string.IsNullOrWhiteSpace(_keyword) ? null : _keyword,
+            SortBy = _sortBy,
+            SortDescending = _sortDescending,
+            Page = _page,
+            PageSize = PageSize
+        };
+
+        (_items, _totalCount) = await AuditService.SearchAsync(filter);
+        _loading = false;
+    }
+
+    private async Task ChangePageAsync(int delta)
+    {
+        _page += delta;
+        await LoadAsync();
+    }
+
+    private async Task SortByAsync(string column)
+    {
+        if (_sortBy == column) _sortDescending = !_sortDescending;
+        else { _sortBy = column; _sortDescending = true; }
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private string SortIndicator(string column) => _sortBy != column ? "" : (_sortDescending ? " ▼" : " ▲");
+
+    private void OpenDetail(AuditLogEntry entry) => _detailEntry = entry;
+
+    private string SummaryFor(AuditLogEntry entry)
+    {
+        if (!string.IsNullOrEmpty(entry.Context)) return Truncate(entry.Context, 70);
+        if (!string.IsNullOrEmpty(entry.NewValue)) return Truncate(entry.NewValue, 70);
+        return "—";
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
+
+    private string ActionBadgeClass(string action) => action switch
+    {
+        "Create" or "SignIn" or "AutoProvision" => "active",
+        "Delete" or "SignInFailed" => "inactive",
+        _ => "pending"
+    };
+}

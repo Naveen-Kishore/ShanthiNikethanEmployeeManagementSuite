@@ -109,13 +109,58 @@ public class CurrentUser : ICurrentUser
 // IAuditService — one call site for every mutation to record itself
 // ==================================================================
 
+/// <summary>
+/// Every filter is optional and additive (AND between categories, OR within
+/// a category's own list) - an empty list for a given category means "don't
+/// filter on this", not "match nothing". This mirrors how Purview's audit
+/// log filtering behaves: pick as many or as few filter groups as you want,
+/// each with one or more checked values.
+/// </summary>
+public class AuditLogSearchFilter
+{
+    public DateTime? FromUtc { get; set; }
+    public DateTime? ToUtc { get; set; }
+    public List<string> Modules { get; set; } = new();
+    public List<string> EntityTypes { get; set; } = new();
+    public List<string> Actions { get; set; } = new();
+
+    /// <summary>Matches against ActorDisplayName (contains, case-insensitive) - free text rather than a checkbox list, since the set of people who've ever acted in the system can grow unbounded.</summary>
+    public string? ActorSearch { get; set; }
+
+    /// <summary>Free-text search across EntityId, OldValue, NewValue, and Context - the fields where "what actually happened" specifics live.</summary>
+    public string? Keyword { get; set; }
+
+    public string SortBy { get; set; } = "OccurredAtUtc";
+    public bool SortDescending { get; set; } = true;
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 50;
+}
+
 public interface IAuditService
 {
+    /// <summary>
+    /// actorDisplayNameOverride/actorObjectIdOverride: normally omitted -
+    /// the actor is read from the injected ICurrentUser. The one case that
+    /// needs these is logging a sign-in event itself: at that exact moment,
+    /// HttpContext.User still reflects the PRE-signin state (SignInAsync
+    /// doesn't retroactively update it mid-request), so ICurrentUser would
+    /// report the wrong actor - these overrides let the caller supply the
+    /// identity directly instead.
+    /// </summary>
     Task LogAsync(string module, string entityType, string? entityId, string action,
                   string? field = null, string? oldValue = null, string? newValue = null,
-                  string? context = null, CancellationToken ct = default);
+                  string? context = null, string? actorDisplayNameOverride = null,
+                  string? actorObjectIdOverride = null, CancellationToken ct = default);
 
     Task<List<AuditLogEntry>> GetRecentAsync(int count = 10, CancellationToken ct = default);
+
+    /// <summary>Filtered, sorted, paged search - the query behind the Audit Log module's UI.</summary>
+    Task<(List<AuditLogEntry> Items, int TotalCount)> SearchAsync(AuditLogSearchFilter filter, CancellationToken ct = default);
+
+    /// <summary>Distinct Module values actually present in the log, for populating that filter group's checkbox list - reflects what's really there rather than a hardcoded guess that could drift from reality.</summary>
+    Task<List<string>> GetDistinctModulesAsync(CancellationToken ct = default);
+    Task<List<string>> GetDistinctEntityTypesAsync(CancellationToken ct = default);
+    Task<List<string>> GetDistinctActionsAsync(CancellationToken ct = default);
 }
 
 public class AuditService : IAuditService
@@ -131,14 +176,15 @@ public class AuditService : IAuditService
 
     public async Task LogAsync(string module, string entityType, string? entityId, string action,
                                string? field = null, string? oldValue = null, string? newValue = null,
-                               string? context = null, CancellationToken ct = default)
+                               string? context = null, string? actorDisplayNameOverride = null,
+                               string? actorObjectIdOverride = null, CancellationToken ct = default)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
         db.AuditLog.Add(new AuditLogEntry
         {
             OccurredAtUtc = DateTime.UtcNow,
-            ActorDisplayName = _user.DisplayName,
-            ActorObjectId = _user.ObjectId,
+            ActorDisplayName = actorDisplayNameOverride ?? _user.DisplayName,
+            ActorObjectId = actorObjectIdOverride ?? _user.ObjectId,
             Module = module,
             EntityType = entityType,
             EntityId = entityId,
@@ -161,5 +207,73 @@ public class AuditService : IAuditService
             .OrderByDescending(a => a.OccurredAtUtc)
             .Take(count)
             .ToListAsync(ct);
+    }
+
+    public async Task<(List<AuditLogEntry> Items, int TotalCount)> SearchAsync(AuditLogSearchFilter filter, CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var query = db.AuditLog.AsNoTracking().AsQueryable();
+
+        if (filter.FromUtc.HasValue)
+            query = query.Where(a => a.OccurredAtUtc >= filter.FromUtc.Value);
+        if (filter.ToUtc.HasValue)
+            query = query.Where(a => a.OccurredAtUtc <= filter.ToUtc.Value);
+
+        if (filter.Modules.Count > 0)
+            query = query.Where(a => filter.Modules.Contains(a.Module));
+        if (filter.EntityTypes.Count > 0)
+            query = query.Where(a => filter.EntityTypes.Contains(a.EntityType));
+        if (filter.Actions.Count > 0)
+            query = query.Where(a => filter.Actions.Contains(a.Action));
+
+        if (!string.IsNullOrWhiteSpace(filter.ActorSearch))
+            query = query.Where(a => a.ActorDisplayName.Contains(filter.ActorSearch));
+
+        if (!string.IsNullOrWhiteSpace(filter.Keyword))
+        {
+            var kw = filter.Keyword;
+            query = query.Where(a =>
+                a.ActorDisplayName.Contains(kw) ||
+                (a.EntityId != null && a.EntityId.Contains(kw)) ||
+                (a.OldValue != null && a.OldValue.Contains(kw)) ||
+                (a.NewValue != null && a.NewValue.Contains(kw)) ||
+                (a.Context != null && a.Context.Contains(kw)));
+        }
+
+        var totalCount = await query.CountAsync(ct);
+
+        query = filter.SortBy switch
+        {
+            "Module" => filter.SortDescending ? query.OrderByDescending(a => a.Module) : query.OrderBy(a => a.Module),
+            "EntityType" => filter.SortDescending ? query.OrderByDescending(a => a.EntityType) : query.OrderBy(a => a.EntityType),
+            "Action" => filter.SortDescending ? query.OrderByDescending(a => a.Action) : query.OrderBy(a => a.Action),
+            "ActorDisplayName" => filter.SortDescending ? query.OrderByDescending(a => a.ActorDisplayName) : query.OrderBy(a => a.ActorDisplayName),
+            _ => filter.SortDescending ? query.OrderByDescending(a => a.OccurredAtUtc) : query.OrderBy(a => a.OccurredAtUtc),
+        };
+
+        var items = await query
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
+            .ToListAsync(ct);
+
+        return (items, totalCount);
+    }
+
+    public async Task<List<string>> GetDistinctModulesAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        return await db.AuditLog.Select(a => a.Module).Distinct().OrderBy(m => m).ToListAsync(ct);
+    }
+
+    public async Task<List<string>> GetDistinctEntityTypesAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        return await db.AuditLog.Select(a => a.EntityType).Distinct().OrderBy(e => e).ToListAsync(ct);
+    }
+
+    public async Task<List<string>> GetDistinctActionsAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        return await db.AuditLog.Select(a => a.Action).Distinct().OrderBy(a => a).ToListAsync(ct);
     }
 }

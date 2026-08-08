@@ -62,29 +62,39 @@ public class LocalAccountController : Controller
                     position: relative; overflow: hidden; min-height: 100vh;
                 }
 
-                /* ---- Background is now a single fixed full-page layer (not confined to the
-                       left panel), so the mobile layout below can drop the light panel entirely
-                       and let the smoke show through everywhere — matching how Pickit's own
-                       mobile view collapses to one continuous purple column. Colours: #762DDC / #CBB8E6.
-                       blur(10px) + a 6% scale-up (to hide the now-fuzzy edges going off-canvas)
-                       is what removes the small circular droplet/bubble shapes baked into the
-                       source clip — those aren't a CSS bug, they're actually in the footage,
-                       and blurring dissolves them into smooth haze instead of hard rings. ---- */
+                /* ---- Background is a real photo of the school campus (a sunset over the
+                       treeline), not an abstract effect — genuinely yours rather than
+                       reverse-engineered from someone else's site, and it sidesteps the
+                       compression-grain problem entirely: there's no compressed video to
+                       amplify, just a normal JPEG, so brightening it never surfaces artifacts.
+
+                       Filters (saturate/contrast/brightness) are gentle — enhancing the
+                       photo's own real colors, not forcing it into a flat brand-purple tint
+                       the way the old grayscale-then-recolor video trick did. That trick made
+                       sense for abstract smoke; it would have destroyed what's actually
+                       beautiful about a real sunset photo.
+
+                       The gradient scrim is what makes it work as a login background rather
+                       than just a pretty photo: dark enough on the left for the white logo to
+                       stay legible against whatever sky color happens to be there, light
+                       enough on the right for the dark heading text and white buttons to read
+                       clearly, with the same left-to-right personality the old design had. ---- */
                 .signin-bg {
                     position: fixed; inset: 0; z-index: 0; overflow: hidden;
-                    background: #762ddc;
+                    background: #6933b6; /* fallback while the image loads */
                 }
-                .ambient-video {
+                .signin-bg-photo {
                     position: absolute; inset: 0; width: 100%; height: 100%;
-                    object-fit: cover;
-                    filter: grayscale(1) brightness(0.6) blur(10px);
-                    transform: scale(1.06);
-                    opacity: 0.22;
+                    object-fit: cover; object-position: center 30%;
+                    filter: saturate(1.1) contrast(1.05) brightness(0.72);
                 }
-                .tint-overlay {
+                .signin-bg-scrim {
                     position: absolute; inset: 0;
-                    background: #762ddc;
-                    mix-blend-mode: color;
+                    background: linear-gradient(115deg,
+                        rgba(6,6,10,0.85) 0%,
+                        rgba(12,12,16,0.60) 22%,
+                        rgba(12,12,16,0.28) 40%,
+                        rgba(12,12,16,0) 55%);
                 }
 
                 .signin-split { position: relative; z-index: 1; display: flex; min-height: 100vh; }
@@ -97,26 +107,26 @@ public class LocalAccountController : Controller
                 }
 
                 .signin-actions-col {
-                    flex: 1 1 40%; background: #cbb8e6; position: relative;
+                    flex: 1 1 40%; background: #fbfaf9; position: relative;
                     display: flex; align-items: center; justify-content: center; padding: 24px;
                 }
                 .signin-actions-inner { width: 100%; max-width: 380px; }
                 .welcome-heading {
-                    margin: 0 0 6px 0; color: #762ddc; font-size: 28px; font-weight: 700;
+                    margin: 0 0 6px 0; color: #1f1f1f; font-size: 28px; font-weight: 700;
                     letter-spacing: -0.01em; line-height: 1.2;
                 }
                 .welcome-subhead {
-                    margin: 0 0 26px 0; color: #5b4b7a; font-size: 14px; font-weight: 500; line-height: 1.4;
+                    margin: 0 0 26px 0; color: #5c5c5c; font-size: 14px; font-weight: 500; line-height: 1.4;
                 }
                 .security-notice {
                     margin-top: 18px; display: flex; align-items: flex-start; gap: 7px;
-                    font-size: 13px; color: #4a3868; line-height: 1.5;
+                    font-size: 13px; color: #4a4a4a; line-height: 1.5;
                 }
                 .security-notice svg { flex-shrink: 0; width: 15px; height: 15px; margin-top: 2px; }
 
                 .page-footer {
                     position: absolute; left: 24px; right: 24px; bottom: 20px;
-                    text-align: center; font-size: 13px; color: #5b4b7a;
+                    text-align: center; font-size: 13px; color: #6b6b6b;
                 }
 
                 /* ---- Mobile: collapse to a single purple column (matches Pickit's own narrow-
@@ -160,12 +170,12 @@ public class LocalAccountController : Controller
                     width: 100%; background: #fff; border: 1px solid #b9a3d9; border-radius: 6px;
                     padding: 8px 10px; font-size: 13.5px; color: #242424; font-family: inherit;
                 }
-                .signin-actions-inner form input:focus { outline: none; border-color: #762ddc; box-shadow: inset 0 -2px 0 0 #762ddc; }
+                .signin-actions-inner form input:focus { outline: none; border-color: #333333; box-shadow: inset 0 -2px 0 0 #333333; }
                 .local-login-error { background: #fde2e2; color: #b42318; padding: 9px 12px; border-radius: 6px; font-size: 12.5px; margin-bottom: 14px; }
                 .signin-subtitle { color: #3d2a5c; font-size: 12.5px; margin: -16px 0 20px 0; }
                 .signin-back-link {
                     display: block; text-align: center; margin-top: 14px; font-size: 12.5px;
-                    color: #762ddc; text-decoration: none; cursor: pointer; background: none; border: none;
+                    color: #333333; text-decoration: none; cursor: pointer; background: none; border: none;
                     width: 100%; font-family: inherit;
                 }
                 .signin-back-link:hover { text-decoration: underline; }
@@ -173,10 +183,8 @@ public class LocalAccountController : Controller
         </head>
         <body>
             <div class="signin-bg">
-                <video class="ambient-video" autoplay loop muted playsinline>
-                    <source src="/video/signin-ambient.mp4" type="video/mp4" />
-                </video>
-                <div class="tint-overlay"></div>
+                <img class="signin-bg-photo" src="/img/signin-background.jpg" alt="" oncontextmenu="return false;" />
+                <div class="signin-bg-scrim"></div>
             </div>
             <div class="signin-split">
             <div class="signin-brand-col">

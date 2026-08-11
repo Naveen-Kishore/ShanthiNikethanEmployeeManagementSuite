@@ -1,0 +1,252 @@
+@page "/automation-rules"
+@using ShanthiNikethan.EmployeeManagement.Modules.AutomationRules.Data
+@using ShanthiNikethan.EmployeeManagement.Modules.AutomationRules.Services
+@inject IGroupAutomationService AutomationService
+@inject ICurrentUser CurrentUser
+
+<h1>Automation Rules</h1>
+
+@if (!CurrentUser.HasPermission("Admin.ManageAutomationRules"))
+{
+    <p class="stat-sub">You don't have permission to view this page.</p>
+}
+else
+{
+    <p class="stat-sub" style="margin-bottom: 18px;">
+        Each rule ties a plain, human-readable name to an actual Entra group. Once created, a rule
+        appears automatically in the "Add Staff" checklist for Office Admins to pick from — no code
+        change or republish needed to add a new one later.
+    </p>
+
+    <div class="alert warning" style="margin-bottom: 18px;">
+        Before creating real rules, confirm the Entra integration actually works — use
+        <a href="/automation-rules/graph-test">Graph Diagnostics</a> to test against a throwaway
+        account first, especially after granting the new Application permissions for the first time.
+    </div>
+
+    <div class="toolbar" style="justify-content: space-between;">
+        <button class="primary" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> Create rule</button>
+        <span class="stat-sub">@_rules.Count item(s)</span>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="stat-sub">Loading…</p>
+    }
+    else if (_rules.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="icon"><Icon Name="settings-adjust" Size="36" /></div>
+            <p>No automation rules yet. Create one to have it appear in the Add Staff checklist.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-scroll">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th>Rule Name</th>
+                    <th>Description</th>
+                    <th>Entra Group Object ID</th>
+                    <th style="width: 90px">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var rule in _rules)
+                {
+                    <tr @onclick="() => OpenEdit(rule)" style="cursor: pointer;">
+                        <td>@rule.RuleName</td>
+                        <td class="stat-sub">@(rule.Description ?? "—")</td>
+                        <td class="stat-sub" style="font-family: ui-monospace, monospace;">@rule.EntraGroupObjectId</td>
+                        <td><span class="badge @(rule.IsEnabled ? "active" : "inactive")">@(rule.IsEnabled ? "Enabled" : "Disabled")</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+}
+
+@* ==================== CREATE / EDIT MODAL ==================== *@
+@if (_showFormDialog)
+{
+    <div class="modal-backdrop" @onclick="() => _showFormDialog = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>@(_editingId == null ? "Create rule" : "Edit rule")</h2>
+
+            <div class="form-row">
+                <label>Rule name *</label>
+                <input type="text" @bind="_formRuleName" placeholder="e.g. Assign License" maxlength="100" />
+                <p class="stat-sub" style="margin-top: 4px;">This is exactly what Office Admins see in the Add Staff checklist — keep it short and plain.</p>
+            </div>
+
+            <div class="form-row">
+                <label>Description (optional)</label>
+                <input type="text" @bind="_formDescription" placeholder="Your own notes — not shown to Office Admins" maxlength="300" />
+            </div>
+
+            <div class="form-row">
+                <label>Entra group Object ID *</label>
+                <input type="text" @bind="_formEntraGroupObjectId" placeholder="e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6" style="font-family: ui-monospace, monospace;" />
+                <p class="stat-sub" style="margin-top: 4px;">Copy this from the group's Overview page in the Entra admin center.</p>
+            </div>
+
+            @if (_editingId != null)
+            {
+                <div class="form-row">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" style="width: auto;" @bind="_formIsEnabled" />
+                        <span>Enabled — appears in the Add Staff checklist</span>
+                    </label>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_formError))
+            {
+                <div class="alert danger">@_formError</div>
+            }
+
+            <div class="modal-actions" style="justify-content: @(_editingId != null ? "space-between" : "flex-end");">
+                @if (_editingId != null)
+                {
+                    <button class="danger" @onclick="() => { _confirmDeleteId = _editingId; _showFormDialog = false; }">Delete</button>
+                }
+                <div style="display: flex; gap: 10px;">
+                    <button class="secondary" @onclick="() => _showFormDialog = false">Cancel</button>
+                    <button class="primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ==================== DELETE CONFIRM ==================== *@
+@if (_confirmDeleteId != null)
+{
+    <div class="modal-backdrop" @onclick="() => _confirmDeleteId = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Delete this rule?</h2>
+            <p class="modal-body">This can't be undone. If it's ever been applied to a staff member, deletion will be blocked — disable it instead in that case.</p>
+            @if (!string.IsNullOrEmpty(_deleteError))
+            {
+                <div class="alert danger">@_deleteError</div>
+            }
+            <div class="modal-actions">
+                <button class="secondary" @onclick="() => _confirmDeleteId = null">Cancel</button>
+                <button class="primary" style="background: var(--danger); border-color: var(--danger);" @onclick="ConfirmDeleteAsync">Delete permanently</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<GroupAutomationRule> _rules = new();
+
+    private bool _showFormDialog;
+    private Guid? _editingId;
+    private string _formRuleName = "";
+    private string _formDescription = "";
+    private string _formEntraGroupObjectId = "";
+    private bool _formIsEnabled = true;
+    private bool _saving;
+    private string? _formError;
+
+    private Guid? _confirmDeleteId;
+    private string? _deleteError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.HasPermission("Admin.ManageAutomationRules")) return;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _rules = await AutomationService.ListRulesAsync(enabledOnly: false);
+        _loading = false;
+    }
+
+    private void OpenCreate()
+    {
+        _editingId = null;
+        _formRuleName = "";
+        _formDescription = "";
+        _formEntraGroupObjectId = "";
+        _formIsEnabled = true;
+        _formError = null;
+        _showFormDialog = true;
+    }
+
+    private void OpenEdit(GroupAutomationRule rule)
+    {
+        _editingId = rule.Id;
+        _formRuleName = rule.RuleName;
+        _formDescription = rule.Description ?? "";
+        _formEntraGroupObjectId = rule.EntraGroupObjectId;
+        _formIsEnabled = rule.IsEnabled;
+        _formError = null;
+        _showFormDialog = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (string.IsNullOrWhiteSpace(_formRuleName))
+        {
+            _formError = "Rule name is required.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_formEntraGroupObjectId))
+        {
+            _formError = "Entra group Object ID is required.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            if (_editingId == null)
+            {
+                await AutomationService.CreateRuleAsync(_formRuleName.Trim(),
+                    string.IsNullOrWhiteSpace(_formDescription) ? null : _formDescription.Trim(),
+                    _formEntraGroupObjectId.Trim());
+            }
+            else
+            {
+                await AutomationService.UpdateRuleAsync(_editingId.Value, _formRuleName.Trim(),
+                    string.IsNullOrWhiteSpace(_formDescription) ? null : _formDescription.Trim(),
+                    _formEntraGroupObjectId.Trim(), _formIsEnabled);
+            }
+            _showFormDialog = false;
+            await ReloadAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _formError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_confirmDeleteId == null) return;
+        _deleteError = null;
+        try
+        {
+            await AutomationService.DeleteRuleAsync(_confirmDeleteId.Value);
+            _confirmDeleteId = null;
+            await ReloadAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _deleteError = ex.Message;
+        }
+    }
+}

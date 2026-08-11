@@ -123,24 +123,28 @@ else
         <table class="grid">
             <thead>
                 <tr>
-                    <th class="sortable" @onclick='() => SortByAsync("OccurredAtUtc")'>When@SortIndicator("OccurredAtUtc")</th>
-                    <th class="sortable" @onclick='() => SortByAsync("ActorDisplayName")'>Actor@SortIndicator("ActorDisplayName")</th>
-                    <th class="sortable" @onclick='() => SortByAsync("Module")'>Module@SortIndicator("Module")</th>
-                    <th class="sortable" @onclick='() => SortByAsync("EntityType")'>Entity Type@SortIndicator("EntityType")</th>
-                    <th class="sortable" @onclick='() => SortByAsync("Action")'>Action@SortIndicator("Action")</th>
-                    <th>Details</th>
+                    <th class="sortable" @onclick='() => SortByAsync("OccurredAtUtc")'>Date</th>
+                    <th>Request ID</th>
+                    <th class="sortable" @onclick='() => SortByAsync("ActorDisplayName")'>User</th>
+                    <th class="sortable" @onclick='() => SortByAsync("RoleGroupAtTime")'>Role Group Assigned</th>
+                    <th class="sortable" @onclick='() => SortByAsync("IsSuccess")'>Status</th>
+                    <th>Sign-in error</th>
+                    <th class="sortable" @onclick='() => SortByAsync("IpAddress")'>IP Address</th>
+                    <th class="sortable" @onclick='() => SortByAsync("GeoLocation")'>Geo-location</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach (var entry in _items)
                 {
-                    <tr @onclick="() => OpenDetail(entry)" style="cursor: pointer;">
-                        <td>@entry.OccurredAtUtc.ToLocalTime().ToString("dd MMM yyyy, hh:mm:ss tt")</td>
+                    <tr @onclick="() => OpenDrawer(entry)" style="cursor: pointer;">
+                        <td>@ToIstDisplay(entry.OccurredAtUtc)</td>
+                        <td class="stat-sub" title="@entry.RequestId">@TruncateMiddle(entry.RequestId)</td>
                         <td>@entry.ActorDisplayName</td>
-                        <td class="stat-sub">@entry.Module</td>
-                        <td class="stat-sub">@entry.EntityType</td>
-                        <td><span class="badge @ActionBadgeClass(entry.Action)">@entry.Action</span></td>
-                        <td class="stat-sub">@SummaryFor(entry)</td>
+                        <td class="stat-sub">@(entry.RoleGroupAtTime ?? "—")</td>
+                        <td><span class="badge @(entry.IsSuccess ? "active" : "inactive")">@(entry.IsSuccess ? "Success" : "Failed")</span></td>
+                        <td class="stat-sub">@(entry.SignInError ?? "—")</td>
+                        <td class="stat-sub">@(entry.IpAddress ?? "—")</td>
+                        <td class="stat-sub">@(entry.GeoLocation ?? "—")</td>
                     </tr>
                 }
             </tbody>
@@ -157,32 +161,80 @@ else
     }
 }
 
-@if (_detailEntry != null)
+@* ==================== DETAIL DRAWER, WITH TABS ==================== *@
+@if (_drawerEntry != null)
 {
-    <div class="modal-backdrop" @onclick="() => _detailEntry = null">
-        <div class="modal" @onclick:stopPropagation="true">
-            <h2>@_detailEntry.Action — @_detailEntry.EntityType</h2>
-            <div class="form-row"><label>When</label><div>@_detailEntry.OccurredAtUtc.ToLocalTime().ToString("dddd, dd MMM yyyy, hh:mm:ss tt")</div></div>
-            <div class="form-row"><label>Actor</label><div>@_detailEntry.ActorDisplayName <span class="stat-sub">(@_detailEntry.ActorObjectId)</span></div></div>
-            <div class="form-row"><label>Module / Entity</label><div>@_detailEntry.Module / @_detailEntry.EntityType@(string.IsNullOrEmpty(_detailEntry.EntityId) ? "" : $" ({_detailEntry.EntityId})")</div></div>
-            @if (!string.IsNullOrEmpty(_detailEntry.FieldName))
-            {
-                <div class="form-row"><label>Field changed</label><div>@_detailEntry.FieldName</div></div>
-            }
-            @if (_detailEntry.OldValue != null || _detailEntry.NewValue != null)
-            {
-                <div class="form-grid">
-                    <div class="form-row"><label>Old value</label><div class="stat-sub" style="white-space: pre-line;">@(_detailEntry.OldValue ?? "—")</div></div>
-                    <div class="form-row"><label>New value</label><div class="stat-sub" style="white-space: pre-line;">@(_detailEntry.NewValue ?? "—")</div></div>
+    <div class="drawer-backdrop" @onclick="() => _drawerEntry = null"></div>
+    <div class="drawer">
+        <div class="drawer-header">
+            <div class="drawer-identity">
+                <div>
+                    <h2 style="margin: 0;">@_drawerEntry.Action</h2>
+                    <span class="badge @(_drawerEntry.IsSuccess ? "active" : "inactive")" style="margin-top: 4px;">@(_drawerEntry.IsSuccess ? "Success" : "Failed")</span>
                 </div>
-            }
-            @if (!string.IsNullOrEmpty(_detailEntry.Context))
-            {
-                <div class="form-row"><label>Context</label><div class="stat-sub" style="white-space: pre-line;">@_detailEntry.Context</div></div>
-            }
-            <div class="modal-actions">
-                <button class="secondary" @onclick="() => _detailEntry = null">Close</button>
             </div>
+            <button class="icon-btn" @onclick="() => _drawerEntry = null"><Icon Name="x" /></button>
+        </div>
+        <div class="drawer-tabs">
+            <button class="drawer-tab @(_drawerTab == "basic" ? "active" : "")" @onclick='() => _drawerTab = "basic"'>Basic Info</button>
+            <button class="drawer-tab @(_drawerTab == "location" ? "active" : "")" @onclick='() => _drawerTab = "location"'>Location &amp; Device</button>
+            <button class="drawer-tab @(_drawerTab == "auth" ? "active" : "")" @onclick='() => _drawerTab = "auth"'>Authentication Details</button>
+        </div>
+        <div class="drawer-body">
+            @if (_drawerTab == "basic")
+            {
+                <div class="form-row"><label>When</label><div>@ToIstDisplay(_drawerEntry.OccurredAtUtc, full: true)</div></div>
+                <div class="form-row"><label>User</label><div>@_drawerEntry.ActorDisplayName <span class="stat-sub">(@_drawerEntry.ActorObjectId)</span></div></div>
+                <div class="form-row"><label>Role group at the time</label><div>@(_drawerEntry.RoleGroupAtTime ?? "—")</div></div>
+                <div class="form-row"><label>Module / Entity</label><div>@_drawerEntry.Module / @_drawerEntry.EntityType@(string.IsNullOrEmpty(_drawerEntry.EntityId) ? "" : $" ({_drawerEntry.EntityId})")</div></div>
+                @if (!string.IsNullOrEmpty(_drawerEntry.FieldName))
+                {
+                    <div class="form-row"><label>Field changed</label><div>@_drawerEntry.FieldName</div></div>
+                }
+                @if (_drawerEntry.OldValue != null || _drawerEntry.NewValue != null)
+                {
+                    <div class="form-grid">
+                        <div class="form-row"><label>Old value</label><div class="stat-sub" style="white-space: pre-line;">@(_drawerEntry.OldValue ?? "—")</div></div>
+                        <div class="form-row"><label>New value</label><div class="stat-sub" style="white-space: pre-line;">@(_drawerEntry.NewValue ?? "—")</div></div>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_drawerEntry.Context))
+                {
+                    <div class="form-row"><label>Context</label><div class="stat-sub" style="white-space: pre-line;">@_drawerEntry.Context</div></div>
+                }
+            }
+            else if (_drawerTab == "location")
+            {
+                <div class="form-row"><label>IP address</label><div>@(_drawerEntry.IpAddress ?? "—")</div></div>
+                <div class="form-row"><label>Geo-location</label><div>@(_drawerEntry.GeoLocation ?? "—")</div></div>
+                <div class="form-row"><label>Device</label><div>@(_drawerEntry.DeviceInfo ?? "—")</div></div>
+                <div class="form-row"><label>Browser</label><div>@(_drawerEntry.BrowserInfo ?? "—")</div></div>
+                @if (!string.IsNullOrEmpty(_drawerEntry.IpAddress) && _drawerEntry.GeoLocation == "Unknown")
+                {
+                    <p class="stat-sub" style="margin-top: 8px;">
+                        The geo-location lookup didn't resolve for this sign-in — this can happen if the lookup
+                        service was briefly unreachable. It never blocks or delays sign-in itself; it's a
+                        best-effort enrichment, not a required step.
+                    </p>
+                }
+            }
+            else
+            {
+                <div class="form-row"><label>Provider</label><div>@(_drawerEntry.Provider ?? "—")</div></div>
+                <div class="form-row">
+                    <label>Status</label>
+                    <div><span class="badge @(_drawerEntry.IsSuccess ? "active" : "inactive")">@(_drawerEntry.IsSuccess ? "Success" : "Failed")</span></div>
+                </div>
+                @if (!string.IsNullOrEmpty(_drawerEntry.SignInError))
+                {
+                    <div class="form-row"><label>Sign-in error</label><div>@_drawerEntry.SignInError</div></div>
+                }
+                <div class="form-row"><label>Request ID</label><div class="stat-sub" style="word-break: break-all;">@(_drawerEntry.RequestId ?? "—")</div></div>
+            }
+        </div>
+        <div class="drawer-footer">
+            <span style="flex: 1;"></span>
+            <button class="secondary" @onclick="() => _drawerEntry = null">Close</button>
         </div>
     </div>
 }
@@ -209,7 +261,8 @@ else
     private string _actorSearch = "";
     private string _keyword = "";
 
-    private AuditLogEntry? _detailEntry;
+    private AuditLogEntry? _drawerEntry;
+    private string _drawerTab = "basic";
 
     private int _rangeStart => _totalCount == 0 ? 0 : (_page - 1) * PageSize + 1;
     private int _rangeEnd => Math.Min(_page * PageSize, _totalCount);
@@ -305,23 +358,33 @@ else
         await LoadAsync();
     }
 
-    private string SortIndicator(string column) => _sortBy != column ? "" : (_sortDescending ? " ▼" : " ▲");
+    // Explicit +5:30 offset rather than relying on the server's configured
+    // timezone (ToLocalTime() depends on that, and cloud VMs often default
+    // to UTC unless someone's explicitly changed it - not reliable). India
+    // doesn't observe DST, so a fixed offset is safe here without needing
+    // IANA timezone database lookups.
+    private static readonly TimeSpan IstOffset = TimeSpan.FromHours(5.5);
 
-    private void OpenDetail(AuditLogEntry entry) => _detailEntry = entry;
-
-    private string SummaryFor(AuditLogEntry entry)
+    private static string ToIstDisplay(DateTime utc, bool full = false)
     {
-        if (!string.IsNullOrEmpty(entry.Context)) return Truncate(entry.Context, 70);
-        if (!string.IsNullOrEmpty(entry.NewValue)) return Truncate(entry.NewValue, 70);
-        return "—";
+        var ist = DateTime.SpecifyKind(utc, DateTimeKind.Utc).Add(IstOffset);
+        var format = full ? "dddd, dd MMM yyyy, hh:mm:ss tt" : "dd MMM yyyy, hh:mm:ss tt";
+        return $"{ist.ToString(format)} IST";
     }
 
-    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
-
-    private string ActionBadgeClass(string action) => action switch
+    private void OpenDrawer(AuditLogEntry entry)
     {
-        "Create" or "SignIn" or "AutoProvision" => "active",
-        "Delete" or "SignInFailed" => "inactive",
-        _ => "pending"
-    };
+        _drawerEntry = entry;
+        _drawerTab = "basic"; // always start on the same tab, regardless of which row/tab was open last
+    }
+
+    // ASP.NET Core's TraceIdentifier is long and not meaningful to read in
+    // full inline in a table cell - shown truncated here with the complete
+    // value available via the title tooltip and in full inside the drawer.
+    private static string TruncateMiddle(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "—";
+        if (s.Length <= 16) return s;
+        return $"{s[..8]}…{s[^6..]}";
+    }
 }

@@ -176,7 +176,7 @@ else
 }
 
 <StaffProfileDrawer Visible="_showDrawer" VisibleChanged="v => _showDrawer = v"
-                     StaffMember="_selectedStaff" OnSaved="ReloadActiveAsync" />
+                     StaffMember="_selectedStaff" OnSaved="ReloadActiveAsync" InitialTab="OpenTab" />
 
 <AddStaffDialog Visible="_showAddDialog" VisibleChanged="v => _showAddDialog = v"
                 OnCreated="_ => ReloadActiveAsync()" />
@@ -205,6 +205,14 @@ else
     private bool _showRemoveDialog;
     private List<Staff> _staffPendingRemoval = new();
     private int _retentionDays;
+
+    /// <summary>Lets other pages deep-link straight to a specific staff member's drawer via /staff?open={staffId} - e.g. a Correspondent notification, or an Access Management placeholder row for staff with no linked account yet.</summary>
+    [SupplyParameterFromQuery(Name = "open")]
+    public Guid? OpenStaffId { get; set; }
+
+    /// <summary>Optional companion to OpenStaffId - which tab to land on (e.g. "Salary"), rather than always the default Personal tab.</summary>
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? OpenTab { get; set; }
 
     private bool AllSelected => SortedStaff.Any() && SortedStaff.All(s => _selectedIds.Contains(s.Id));
 
@@ -243,6 +251,12 @@ else
     {
         _retentionDays = Config.GetValue<int>("DataRetention:SoftDeleteRetentionDays", 60);
         await ReloadAllAsync();
+
+        if (OpenStaffId.HasValue)
+        {
+            var match = _activeStaff.FirstOrDefault(s => s.Id == OpenStaffId.Value);
+            if (match != null) OpenDrawer(match);
+        }
     }
 
     private async Task SwitchTab(string tab)

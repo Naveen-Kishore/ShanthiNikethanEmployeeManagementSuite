@@ -61,6 +61,10 @@ public static class PermissionCatalog
         // ---- Audit Log ----
         new("Admin.ViewAuditLog", "View Audit Log", "Audit Log",
             "Read-only visibility into every recorded system activity - sign-ins, role changes, account changes, and other tracked actions across the app."),
+
+        // ---- Automation Rules ----
+        new("Admin.ManageAutomationRules", "Manage Automation Rules", "Automation Rules",
+            "Define which Entra groups get applied automatically during staff onboarding/offboarding - the actual Entra group Object IDs are only ever visible here, never to Office Admins."),
     };
 
     public static PermissionDefinition? Find(string key) => All.FirstOrDefault(p => p.Key == key);

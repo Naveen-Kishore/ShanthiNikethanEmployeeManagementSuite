@@ -2,9 +2,29 @@
 @inject IDashboardService DashboardService
 @inject IJSRuntime JS
 @inject ICurrentUser CurrentUser
+@inject IDashboardNotificationService NotificationService
 @using System.Text.Json
 
 <h1>Dashboard</h1>
+
+@if (_notifications.Count > 0)
+{
+    <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+        @foreach (var n in _notifications)
+        {
+            <div class="alert warning" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+                <div>
+                    @n.Message
+                    @if (!string.IsNullOrEmpty(n.LinkUrl))
+                    {
+                        <a href="@n.LinkUrl" style="margin-left: 6px;">View</a>
+                    }
+                </div>
+                <button type="button" class="icon-btn" title="Dismiss" @onclick="() => DismissNotificationAsync(n.Id)"><Icon Name="x" Size="14" /></button>
+            </div>
+        }
+    </div>
+}
 
 @if (_loading)
 {
@@ -161,6 +181,7 @@ else if (_data != null)
 @code {
     private DashboardData? _data;
     private bool _loading = true;
+    private List<DashboardNotification> _notifications = new();
     private bool _chartsRendered;
 
     private string GreetingLine
@@ -177,7 +198,14 @@ else if (_data != null)
     protected override async Task OnInitializedAsync()
     {
         _data = await DashboardService.GetDashboardDataAsync();
+        _notifications = await NotificationService.GetActiveForCurrentUserAsync();
         _loading = false;
+    }
+
+    private async Task DismissNotificationAsync(Guid notificationId)
+    {
+        await NotificationService.DismissAsync(notificationId);
+        _notifications.RemoveAll(n => n.Id == notificationId);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

@@ -1,7 +1,10 @@
 @page "/admin"
 @inject IUserAccountService UserAccountService
+@inject IOffboardingService OffboardingService
 @inject IStaffProfileService StaffService
 @inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ShanthiNikethan.EmployeeManagement.Modules.AutomationRules.Services.IGraphProvisioningService GraphService
 
 <h1>Access Management</h1>
 
@@ -19,7 +22,7 @@ else
         }
         @if (CurrentUser.HasPermission("Admin.ManageUsers"))
         {
-            <button class="filter-tab @(_tab == "members" ? "active" : "")" @onclick='() => _tab = "members"'>Members</button>
+            <button class="filter-tab @(_tab == "members" ? "active" : "")" @onclick='() => _tab = "members"'>Users</button>
         }
         <button class="filter-tab @(_tab == "mine" ? "active" : "")" @onclick='() => _tab = "mine"'>My Permissions</button>
     </div>
@@ -99,8 +102,8 @@ else
     @if (_tab == "members" && CurrentUser.HasPermission("Admin.ManageUsers"))
     {
         <div class="toolbar" style="justify-content: space-between;">
-            <button class="primary" @onclick="OpenCreateUser"><Icon Name="plus" Size="16" /> Add member</button>
-            <span class="stat-sub">@_userAccounts.Count item(s)</span>
+            <button class="primary" @onclick="OpenCreateUser"><Icon Name="plus" Size="16" /> Add user</button>
+            <span class="stat-sub">@(_userAccounts.Count + StaffWithoutAccount.Count) item(s)</span>
         </div>
 
         @if (_loadingUsers)
@@ -141,7 +144,7 @@ else
                             <td class="stat-sub">
                                 @if (u.RoleGroupExpiresAtUtc.HasValue)
                                 {
-                                    <span style="@(isExpired ? "color: var(--danger);" : "")">@u.RoleGroupExpiresAtUtc.Value.ToString("dd MMM yyyy")@(isExpired ? " (expired)" : "")</span>
+                                    <span style="@(isExpired ? "color: var(--danger);" : "")">@UtcToIstDate(u.RoleGroupExpiresAtUtc)?.ToString("dd MMM yyyy")@(isExpired ? " (expired)" : "")</span>
                                 }
                                 else
                                 {
@@ -150,6 +153,18 @@ else
                             </td>
                             <td class="stat-sub">@(u.StaffId.HasValue ? StaffName(u.StaffId.Value) : "—")</td>
                             <td class="stat-sub">@(u.LastLoginAtUtc?.ToString("dd MMM yyyy, hh:mm tt") ?? "Never")</td>
+                        </tr>
+                    }
+                    @foreach (var s in StaffWithoutAccount)
+                    {
+                        <tr @onclick="() => OpenStaffDeepLink(s.Id)"
+                            style="cursor: pointer; color: var(--text-muted, #767676); border-left: 3px dashed var(--border);">
+                            <td>@s.DisplayName</td>
+                            <td class="stat-sub" style="font-style: italic;">No sign-in configured</td>
+                            <td class="stat-sub">—</td>
+                            <td class="stat-sub">—</td>
+                            <td class="stat-sub">@s.DisplayName</td>
+                            <td class="stat-sub">—</td>
                         </tr>
                     }
                 </tbody>
@@ -236,11 +251,19 @@ else
 {
     <div class="modal-backdrop" @onclick="() => _showUserDialog = false">
         <div class="modal" @onclick:stopPropagation="true">
-            <h2>Add member</h2>
+            <h2>Add user</h2>
 
             <div class="form-row">
                 <label>Display name</label>
-                <input type="text" @bind="_newUser.DisplayName" placeholder="Full name" />
+                <input type="text" @bind="_newUser.DisplayName" @bind:event="oninput" @bind:after="OnNewUserNameChanged"
+                       list="staffNameSuggestions" placeholder="Full name" autocomplete="off" />
+                <datalist id="staffNameSuggestions">
+                    @foreach (var s in _allStaff)
+                    {
+                        <option value="@s.DisplayName">@s.StaffCode</option>
+                    }
+                </datalist>
+                <p class="stat-sub" style="margin-top: 4px;">Start typing to find an existing staff member — picking one links their profile automatically.</p>
             </div>
 
             <div class="form-row">
@@ -271,12 +294,16 @@ else
 
             <div class="form-row">
                 <label>Entra ID UPN (optional — e.g. name@school.onmicrosoft.com)</label>
-                <input type="text" @bind="_newUser.EntraUpn" placeholder="Leave blank if not using Entra sign-in" />
+                <input type="text" @bind="_newUser.EntraUpn" placeholder="Leave blank if not using Entra sign-in" disabled="@_newUserLocalLoginEnabled" />
+                @if (_newUserLocalLoginEnabled)
+                {
+                    <p class="stat-sub" style="margin-top: 4px;">Local login accounts can't also have an Entra identity — this is a break-glass mechanism specifically, kept separate from Entra sign-in on purpose.</p>
+                }
             </div>
 
             <div class="form-row">
                 <label>
-                    <input type="checkbox" @bind="_newUserLocalLoginEnabled" style="width: auto; margin-right: 6px;" />
+                    <input type="checkbox" @bind="_newUserLocalLoginEnabled" @bind:after="OnNewUserLocalLoginToggled" style="width: auto; margin-right: 6px;" />
                     Enable local login (emergency fallback)
                 </label>
             </div>
@@ -285,7 +312,11 @@ else
             {
                 <div class="form-row">
                     <label>Local username</label>
-                    <input type="text" @bind="_newUser.LocalUsername" placeholder="e.g. officeadmin2" />
+                    <input type="text" @bind="_newUser.LocalUsername" @onblur="CheckNewUserLocalUsernameUniquenessAsync" placeholder="e.g. officeadmin2" />
+                    @if (!string.IsNullOrEmpty(_newUserUsernameError))
+                    {
+                        <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_newUserUsernameError</div>
+                    }
                 </div>
                 <div class="form-row">
                     <label>Local password</label>
@@ -314,7 +345,7 @@ else
 
             <div class="modal-actions">
                 <button class="secondary" @onclick="() => _showUserDialog = false">Cancel</button>
-                <button class="primary" @onclick="SaveUser" disabled="@(_savingUser || !NewUserIsValid)">@(_savingUser ? "Saving…" : "Add member")</button>
+                <button class="primary" @onclick="SaveUser" disabled="@(_savingUser || !NewUserIsValid)">@(_savingUser ? "Saving…" : "Add user")</button>
             </div>
         </div>
     </div>
@@ -338,40 +369,133 @@ else
             <button class="icon-btn" @onclick="() => _drawerUser = null"><Icon Name="x" /></button>
         </div>
         <div class="drawer-body">
-            <div class="form-row">
-                <label>Name</label>
-                <input type="text" @bind="_drawerName" />
-            </div>
-            <div class="form-row">
-                <label>Entra ID UPN</label>
-                <input type="text" @bind="_drawerEntraUpn" placeholder="e.g. name@school.onmicrosoft.com" />
-            </div>
-            <div class="form-row">
-                <label>Entra ID Object ID</label>
-                <input type="text" @bind="_drawerEntraObjectId" placeholder="Leave blank if not using Entra sign-in" />
-                <p class="stat-sub" style="margin-top: 4px;">Change this if you're moving this account to a different Entra tenant — the Object ID is tenant-specific, so a new app registration in a new tenant means a new value here. Leave blank to have it fill in automatically on next sign-in instead.</p>
-            </div>
-            <div class="form-row">
-                <label>
-                    <input type="checkbox" @bind="_drawerLocalLoginEnabled" style="width: auto; margin-right: 6px;" />
-                    Local login enabled (emergency fallback)
-                </label>
-            </div>
-            @if (_drawerLocalLoginEnabled)
+            @if (IsLinkedAccount)
             {
-                <div class="form-row">
-                    <label>Local username</label>
-                    <input type="text" @bind="_drawerLocalUsername" placeholder="e.g. officeadmin" />
-                </div>
-                <div class="form-row">
-                    <label>Reset password</label>
-                    <input type="password" @bind="_drawerNewLocalPassword" placeholder="Leave blank to keep the current password" />
-                    <p class="stat-sub" style="margin-top: 4px;">At least 8 characters. Only applied if you type something here.</p>
+                <div class="alert warning" style="margin-top: 0;">
+                    This account is linked to a staff profile and was set up through the onboarding flow — name,
+                    UPN, Object ID, and the staff link itself are locked here to keep them in sync with that.
+                    Role group and expiration can still be changed.
                 </div>
             }
             <div class="form-row">
+                <label>Name</label>
+                <input type="text" @bind="_drawerName" readonly="@IsLinkedAccount" />
+            </div>
+            <div class="form-row">
+                <label>Entra ID UPN</label>
+                <input type="text" @bind="_drawerEntraUpn" placeholder="e.g. name@school.onmicrosoft.com" disabled="@(_drawerLocalLoginEnabled || IsLinkedAccount)" />
+            </div>
+            <div class="form-row">
+                <label>Entra ID Object ID</label>
+                <input type="text" @bind="_drawerEntraObjectId" placeholder="Leave blank if not using Entra sign-in" disabled="@(_drawerLocalLoginEnabled || IsLinkedAccount)" />
+                @if (_drawerLocalLoginEnabled)
+                {
+                    <p class="stat-sub" style="margin-top: 4px;">Local login accounts can't also have an Entra identity — this is a break-glass mechanism specifically, kept separate from Entra sign-in on purpose.</p>
+                }
+                else if (!IsLinkedAccount)
+                {
+                    <p class="stat-sub" style="margin-top: 4px;">Change this if you're moving this account to a different Entra tenant — the Object ID is tenant-specific, so a new app registration in a new tenant means a new value here. Leave blank to have it fill in automatically on next sign-in instead.</p>
+                }
+            </div>
+            @if (IsLinkedAccount && (CurrentUser.HasPermission("Admin.ManageUsers") || CurrentUser.HasPermission("StaffDirectory.ViewFinancials")))
+            {
+                <div class="form-row">
+                    <label>Staff record ID</label>
+                    <input type="text" value="@_drawerUser?.StaffId" readonly />
+                    <p class="stat-sub" style="margin-top: 4px;">
+                        The same permanent identifier shown on this person's Staff Profile — set once when their
+                        profile was created and never changes, which is what keeps this account correctly linked
+                        to that same profile for as long as both exist.
+                    </p>
+                </div>
+            }
+            @if (IsLinkedAccount && !_drawerLocalLoginEnabled)
+            {
+                @if (CurrentUser.HasPermission("Admin.ManageUsers"))
+                {
+                    <div class="form-row" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 8px;">
+                        <label>Local login override (Global Admin only)</label>
+                        <p class="stat-sub" style="margin-top: 4px;">
+                            This account currently signs in via Entra. Converting it to local login clears its Entra
+                            identity — this is a deliberate, separate action, not a normal field edit.
+                        </p>
+                        @if (!_showConvertToLocalLogin)
+                        {
+                            <button class="secondary" style="margin-top: 8px;" @onclick="() => _showConvertToLocalLogin = true">Convert to local login instead</button>
+                        }
+                        else
+                        {
+                            <div class="form-row" style="margin-top: 8px;">
+                                <label>Local username</label>
+                                <input type="text" @bind="_convertLocalUsername" @onblur="CheckConvertLocalUsernameUniquenessAsync" placeholder="e.g. a.naveen" />
+                                @if (!string.IsNullOrEmpty(_convertUsernameError))
+                                {
+                                    <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_convertUsernameError</div>
+                                }
+                            </div>
+                            <div class="form-row">
+                                <label>Password</label>
+                                <input type="password" @bind="_convertLocalPassword" placeholder="At least 8 characters" />
+                            </div>
+                            @if (!string.IsNullOrEmpty(_convertError))
+                            {
+                                <div class="alert danger">@_convertError</div>
+                            }
+                            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                <button class="secondary" @onclick="() => _showConvertToLocalLogin = false">Cancel</button>
+                                <button class="primary" @onclick="ConfirmConvertToLocalLoginAsync" disabled="@(_converting || !string.IsNullOrEmpty(_convertUsernameError))">
+                                    @(_converting ? "Converting…" : "Convert")
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="form-row">
+                    <label>
+                        <input type="checkbox" @bind="_drawerLocalLoginEnabled" @bind:after="OnDrawerLocalLoginToggled" style="width: auto; margin-right: 6px;" />
+                        Local login enabled (emergency fallback)
+                    </label>
+                </div>
+                @if (_drawerLocalLoginEnabled)
+                {
+                    <div class="form-row">
+                        <label>Local username</label>
+                        <input type="text" @bind="_drawerLocalUsername" @onblur="CheckDrawerLocalUsernameUniquenessAsync" placeholder="e.g. officeadmin" />
+                        @if (!string.IsNullOrEmpty(_drawerLocalUsernameError))
+                        {
+                            <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_drawerLocalUsernameError</div>
+                        }
+                    </div>
+                    <div class="form-row">
+                        <label>Reset password</label>
+                        <input type="password" @bind="_drawerNewLocalPassword" placeholder="Leave blank to keep the current password" />
+                        <p class="stat-sub" style="margin-top: 4px;">At least 8 characters. Only applied if you type something here.</p>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_drawerUser?.ArchivedEntraObjectId) && CurrentUser.HasPermission("Admin.ManageUsers"))
+                {
+                    <div class="form-row" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 8px;">
+                        <label>Revert to Entra sign-in (Global Admin only)</label>
+                        <p class="stat-sub" style="margin-top: 4px;">
+                            This account was converted from Entra to local login. The original Entra identity was
+                            preserved — reverting checks it's still valid in your tenant before restoring it.
+                        </p>
+                        @if (!string.IsNullOrEmpty(_revertError))
+                        {
+                            <div class="alert danger" style="margin-top: 8px;">@_revertError</div>
+                        }
+                        <button class="secondary" style="margin-top: 8px;" @onclick="ConfirmRevertToEntraAsync" disabled="@_reverting">
+                            @(_reverting ? "Checking Entra…" : "Revert to Entra sign-in")
+                        </button>
+                    </div>
+                }
+            }
+            <div class="form-row">
                 <label>Linked staff profile</label>
-                <select @bind="_drawerStaffId">
+                <select @bind="_drawerStaffId" disabled="@IsLinkedAccount">
                     <option value="">— None —</option>
                     @foreach (var s in _allStaff)
                     {
@@ -397,7 +521,7 @@ else
             <label style="display: block; margin: 14px 0 6px 0; font-weight: 600;">Roles from this role group</label>
             <div class="stat-sub" style="line-height: 1.8;">
                 @{
-                    var group = _roleGroups.FirstOrDefault(g => g.Id == _drawerUser.RoleGroupId);
+                    var group = _roleGroups.FirstOrDefault(g => g.Id == _drawerUser!.RoleGroupId);
                 }
                 @if (group == null || group.Permissions.Count == 0)
                 {
@@ -416,7 +540,7 @@ else
             <div class="form-row" style="margin-top: 18px;">
                 <label>Account history</label>
                 <div class="stat-sub">
-                    Created @_drawerUser.CreatedAtUtc.ToString("dd MMM yyyy") by @_drawerUser.CreatedByDisplayName<br />
+                    Created @_drawerUser!.CreatedAtUtc.ToString("dd MMM yyyy") by @_drawerUser.CreatedByDisplayName<br />
                     Last login: @(_drawerUser.LastLoginAtUtc?.ToString("dd MMM yyyy, hh:mm tt") ?? "Never")
                 </div>
             </div>
@@ -448,15 +572,46 @@ else
 {
     <div class="modal-backdrop" @onclick="() => _confirmDeleteUser = null">
         <div class="modal" @onclick:stopPropagation="true">
-            <h2>Delete "@_confirmDeleteUser.DisplayName"?</h2>
-            <p class="modal-body">This permanently removes the account. This can't be undone — if you just want to disable access, use Deactivate instead.</p>
+            @if (_confirmDeleteUser.StaffId.HasValue)
+            {
+                <h2>Remove "@_confirmDeleteUser.DisplayName"?</h2>
+                <p class="modal-body">
+                    This is linked to a staff profile — removing it here also moves that staff profile to the
+                    soft-deleted list and disables the linked Entra account. Both stay recoverable (Entra for 30
+                    days, the staff profile per your usual retention window), so this isn't permanent the way a
+                    standalone account's delete is.
+                </p>
+                <div class="form-row">
+                    <label>Reason (optional)</label>
+                    <input type="text" @bind="_deleteReason" placeholder="e.g. Resigned" />
+                </div>
+                @if (_offboardWarnings.Count > 0)
+                {
+                    <div class="alert warning">
+                        <strong>Removed, but a few things need a second look:</strong>
+                        <ul style="margin: 6px 0 0 18px; padding: 0;">
+                            @foreach (var w in _offboardWarnings)
+                            {
+                                <li>@w</li>
+                            }
+                        </ul>
+                    </div>
+                }
+            }
+            else
+            {
+                <h2>Delete "@_confirmDeleteUser.DisplayName"?</h2>
+                <p class="modal-body">This permanently removes the account. This can't be undone — if you just want to disable access, use Deactivate instead.</p>
+            }
             @if (!string.IsNullOrEmpty(_drawerError))
             {
                 <div class="alert danger">@_drawerError</div>
             }
             <div class="modal-actions">
-                <button class="secondary" @onclick="() => { _confirmDeleteUser = null; _drawerError = null; }">Cancel</button>
-                <button class="primary" style="background: var(--danger); border-color: var(--danger);" @onclick="DeleteDrawerUser">Delete permanently</button>
+                <button class="secondary" @onclick="() => { _confirmDeleteUser = null; _drawerError = null; _offboardWarnings.Clear(); }">Cancel</button>
+                <button class="primary" style="background: var(--danger); border-color: var(--danger);" @onclick="DeleteDrawerUser" disabled="@_deletingUser">
+                    @(_deletingUser ? "Working…" : (_confirmDeleteUser.StaffId.HasValue ? "Remove" : "Delete permanently"))
+                </button>
             </div>
         </div>
     </div>
@@ -542,7 +697,7 @@ else
                             {
                                 <tr>
                                     <td>@m.DisplayName</td>
-                                    <td class="stat-sub">@(m.RoleGroupExpiresAtUtc?.ToString("dd MMM yyyy") ?? "Never")</td>
+                                    <td class="stat-sub">@(UtcToIstDate(m.RoleGroupExpiresAtUtc)?.ToString("dd MMM yyyy") ?? "Never")</td>
                                     <td><button class="icon-btn" title="Edit member" @onclick="() => { _drawerRoleGroup = null; OpenUserDrawer(m); }"><Icon Name="pencil" Size="14" /></button></td>
                                 </tr>
                             }
@@ -615,6 +770,30 @@ else
     private string _newUserLocalPassword = "";
     private DateTime? _newUserExpiryDate;
 
+    // Explicit +5:30 arithmetic, not .ToUniversalTime()/.ToLocalTime() -
+    // those depend on whatever timezone the SERVER's own clock happens to
+    // be set to, which is exactly what caused a picked date to shift by a
+    // day: saving used .ToUniversalTime() (server-timezone-dependent) while
+    // the Users list row display used the raw stored value with zero
+    // conversion at all - two inconsistent paths. This is the same fixed-
+    // offset approach already proven correct for Audit Log timestamps.
+    private static readonly TimeSpan IstOffset = TimeSpan.FromHours(5.5);
+
+    /// <summary>Converts a date picked in an &lt;input type="date"&gt; (a calendar date the person means in IST) into the UTC instant for 23:59:59 on that IST calendar date - so access remains valid through the whole day intended, and the date survives the round trip through storage without shifting.</summary>
+    private static DateTime? DatePickerToEndOfDayUtc(DateTime? pickedDate)
+    {
+        if (!pickedDate.HasValue) return null;
+        var endOfDayIst = pickedDate.Value.Date.AddDays(1).AddSeconds(-1);
+        return DateTime.SpecifyKind(endOfDayIst - IstOffset, DateTimeKind.Utc);
+    }
+
+    /// <summary>Reverses DatePickerToEndOfDayUtc - recovers the original IST calendar date from a stored UTC value, for both re-populating the date picker and for plain display.</summary>
+    private static DateTime? UtcToIstDate(DateTime? utcValue)
+    {
+        if (!utcValue.HasValue) return null;
+        return DateTime.SpecifyKind(utcValue.Value, DateTimeKind.Utc).Add(IstOffset).Date;
+    }
+
     private bool NewUserIsValid
     {
         get
@@ -626,6 +805,7 @@ else
                 && !string.IsNullOrWhiteSpace(_newUser.LocalUsername)
                 && _newUserLocalPassword.Length >= 8;
             if (_newUserLocalLoginEnabled && !hasValidLocal) return false; // checked but incomplete - block regardless of Entra
+            if (_newUserLocalLoginEnabled && !string.IsNullOrEmpty(_newUserUsernameError)) return false;
             return hasEntra || hasValidLocal;
         }
     }
@@ -640,11 +820,32 @@ else
     private string _drawerEntraObjectId = "";
     private bool _drawerLocalLoginEnabled;
     private string _drawerLocalUsername = "";
+    private bool _showConvertToLocalLogin;
+    private string _convertLocalUsername = "";
+    private string _convertLocalPassword = "";
+    private string? _convertError;
+    private string? _drawerLocalUsernameError;
+    private string? _convertUsernameError;
+    private string? _newUserUsernameError;
+    private bool _converting;
+    private string? _revertError;
+    private bool _reverting;
     private string _drawerNewLocalPassword = "";
+
+    // True for accounts created through the onboarding flow (Add Staff's
+    // "Enable sign-in" path) - identifiable by having a linked Staff
+    // profile from the moment the drawer was opened. Locks identity
+    // fields so they stay governed by that flow rather than hand-edited;
+    // standalone accounts with no Staff link (e.g. a break-glass admin
+    // account) keep full edit capability, same as before.
+    private bool IsLinkedAccount => _drawerUser?.StaffId.HasValue == true;
     private Guid _drawerRoleGroupId;
     private DateTime? _drawerExpiryDate;
     private string? _drawerError;
     private UserAccount? _confirmDeleteUser;
+    private string _deleteReason = "";
+    private bool _deletingUser;
+    private List<string> _offboardWarnings = new();
 
     // ---- Role group detail drawer ----
     private RoleGroup? _drawerRoleGroup;
@@ -686,6 +887,12 @@ else
     private string RoleGroupName(Guid id) => _roleGroups.FirstOrDefault(g => g.Id == id)?.Name ?? "—";
     private string StaffName(Guid staffId) => _allStaff.FirstOrDefault(s => s.Id == staffId)?.DisplayName ?? "—";
 
+    /// <summary>Active staff with no linked UserAccount at all - shown as placeholder rows so Access Management reflects every staff member, not just ones with sign-in already configured.</summary>
+    private List<Staff> StaffWithoutAccount =>
+        _allStaff.Where(s => !_userAccounts.Any(u => u.StaffId == s.Id)).ToList();
+
+    private void OpenStaffDeepLink(Guid staffId) => Nav.NavigateTo($"/staff?open={staffId}");
+
     // Shared toggle helper used by both permission checkbox lists.
     private void TogglePermission(HashSet<string> selected, string key, bool isChecked)
     {
@@ -722,6 +929,10 @@ else
         {
             _roleGroupError = ex.Message;
         }
+        catch (Exception ex)
+        {
+            _roleGroupError = $"This couldn't be saved: {ex.Message}";
+        }
         finally
         {
             _savingRoleGroup = false;
@@ -738,7 +949,31 @@ else
         _newUserLocalPassword = "";
         _newUserExpiryDate = null;
         _userError = null;
+        _newUserUsernameError = null;
         _showUserDialog = true;
+    }
+
+    // Fires on every keystroke via @bind:after - cheap enough given
+    // _allStaff is already loaded in memory, no extra query per keystroke.
+    // An exact match (which only happens by typing a full name or picking
+    // one from the datalist suggestions) auto-links that staff profile,
+    // rather than leaving Display Name and Link to staff profile as two
+    // disconnected fields that happen to usually refer to the same person.
+    private void OnNewUserNameChanged()
+    {
+        var match = _allStaff.FirstOrDefault(s => s.DisplayName.Equals(_newUser.DisplayName, StringComparison.OrdinalIgnoreCase));
+        if (match != null)
+            _newUserStaffId = match.Id.ToString();
+    }
+
+    // Local login and Entra identity are mutually exclusive by design - the
+    // fallback accounts are a break-glass mechanism specifically meant to
+    // work even when Entra itself is unavailable, so linking one to an
+    // Entra identity would defeat the point. Clears rather than just
+    // disabling, so a stale UPN can't accidentally get saved invisibly.
+    private void OnNewUserLocalLoginToggled()
+    {
+        if (_newUserLocalLoginEnabled) _newUser.EntraUpn = "";
     }
 
     private async Task SaveUser()
@@ -769,7 +1004,7 @@ else
         {
             _savingUser = true;
             _newUser.RoleGroupId = _newUserRoleGroupId;
-            _newUser.RoleGroupExpiresAtUtc = _newUserExpiryDate?.ToUniversalTime();
+            _newUser.RoleGroupExpiresAtUtc = DatePickerToEndOfDayUtc(_newUserExpiryDate);
             _newUser.LocalLoginEnabled = _newUserLocalLoginEnabled;
             _newUser.StaffId = Guid.TryParse(_newUserStaffId, out var sid) ? sid : null;
             _newUser.EntraUpn = string.IsNullOrWhiteSpace(_newUser.EntraUpn) ? null : _newUser.EntraUpn.Trim();
@@ -782,6 +1017,10 @@ else
         catch (InvalidOperationException ex)
         {
             _userError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _userError = $"This couldn't be saved: {ex.Message}";
         }
         finally
         {
@@ -801,8 +1040,158 @@ else
         _drawerLocalUsername = u.LocalUsername ?? "";
         _drawerNewLocalPassword = "";
         _drawerRoleGroupId = u.RoleGroupId;
-        _drawerExpiryDate = u.RoleGroupExpiresAtUtc?.ToLocalTime().Date;
+        _drawerExpiryDate = UtcToIstDate(u.RoleGroupExpiresAtUtc);
         _drawerError = null;
+        _showConvertToLocalLogin = false;
+        _convertLocalUsername = "";
+        _convertLocalPassword = "";
+        _convertError = null;
+        _revertError = null;
+        _drawerLocalUsernameError = null;
+        _convertUsernameError = null;
+    }
+
+    // All three check both LocalUsername and Entra UPN prefix (via
+    // FindAnyAccountByUsernameAsync) - excludes the account currently
+    // being edited from the match, since it's fine (and expected) for a
+    // value to match itself unchanged.
+    private async Task CheckDrawerLocalUsernameUniquenessAsync()
+    {
+        _drawerLocalUsernameError = null;
+        if (string.IsNullOrWhiteSpace(_drawerLocalUsername) || _drawerUser == null) return;
+
+        var match = await UserAccountService.FindAnyAccountByUsernameAsync(_drawerLocalUsername.Trim());
+        if (match != null && match.Id != _drawerUser.Id)
+            _drawerLocalUsernameError = $"Already in use by \"{match.DisplayName}\".";
+    }
+
+    private async Task CheckConvertLocalUsernameUniquenessAsync()
+    {
+        _convertUsernameError = null;
+        if (string.IsNullOrWhiteSpace(_convertLocalUsername) || _drawerUser == null) return;
+
+        var match = await UserAccountService.FindAnyAccountByUsernameAsync(_convertLocalUsername.Trim());
+        if (match != null && match.Id != _drawerUser.Id)
+            _convertUsernameError = $"Already in use by \"{match.DisplayName}\".";
+    }
+
+    private async Task CheckNewUserLocalUsernameUniquenessAsync()
+    {
+        _newUserUsernameError = null;
+        if (string.IsNullOrWhiteSpace(_newUser.LocalUsername)) return;
+
+        var match = await UserAccountService.FindAnyAccountByUsernameAsync(_newUser.LocalUsername.Trim());
+        if (match != null)
+            _newUserUsernameError = $"Already in use by \"{match.DisplayName}\".";
+    }
+
+    private async Task ConfirmConvertToLocalLoginAsync()
+    {
+        if (_drawerUser == null) return;
+        _convertError = null;
+
+        if (string.IsNullOrWhiteSpace(_convertLocalUsername))
+        {
+            _convertError = "Enter a username.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_convertLocalPassword) || _convertLocalPassword.Length < 8)
+        {
+            _convertError = "Password must be at least 8 characters.";
+            return;
+        }
+
+        _converting = true;
+        try
+        {
+            await UserAccountService.EnableLocalLoginOverrideAsync(_drawerUser.Id, _convertLocalUsername.Trim(), _convertLocalPassword);
+            _showConvertToLocalLogin = false;
+            await ReloadUsersAsync();
+            _drawerUser = _userAccounts.FirstOrDefault(u => u.Id == _drawerUser.Id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _convertError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            // Anything else unexpected - a raw database error, for
+            // instance - still shows as a clean message here rather than
+            // propagating up and crashing the whole circuit. The database's
+            // own unique constraint is a real, independent safety net
+            // beyond the application-level check above, so this path
+            // needs to be handled gracefully regardless of how it's hit.
+            _convertError = $"This couldn't be saved: {ex.Message}";
+        }
+        finally
+        {
+            _converting = false;
+        }
+    }
+
+    private async Task ConfirmRevertToEntraAsync()
+    {
+        if (_drawerUser == null) return;
+        _revertError = null;
+        _reverting = true;
+        try
+        {
+            await UserAccountService.RevertToEntraAsync(_drawerUser.Id);
+            await ReloadUsersAsync();
+            _drawerUser = _userAccounts.FirstOrDefault(u => u.Id == _drawerUser.Id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _revertError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _revertError = $"This couldn't be saved: {ex.Message}";
+        }
+        finally
+        {
+            _reverting = false;
+        }
+    }
+
+    // Same reasoning as the create dialog's version - local login and Entra
+    // identity are mutually exclusive by design.
+    private async Task OnDrawerLocalLoginToggled()
+    {
+        if (_drawerLocalLoginEnabled)
+        {
+            _drawerEntraUpn = "";
+            _drawerEntraObjectId = "";
+            return;
+        }
+
+        // Unchecking on a converted account (still has a StaffId from
+        // before it was switched to local login) - the regular Save
+        // button goes through UpdateUserAccountDetailsAsync, which
+        // silently ignores this exact field for any account with a
+        // StaffId, since that's the same lock protecting a genuinely
+        // linked account's identity fields from being hand-edited.
+        // Applied immediately here instead, via the one method built
+        // specifically to bypass that lock for this scenario.
+        if (IsLinkedAccount && _drawerUser != null)
+        {
+            try
+            {
+                await UserAccountService.DisableLocalLoginOverrideAsync(_drawerUser.Id);
+                await ReloadUsersAsync();
+                _drawerUser = _userAccounts.FirstOrDefault(u => u.Id == _drawerUser.Id);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _drawerError = ex.Message;
+                _drawerLocalLoginEnabled = true; // revert the checkbox - the change didn't actually apply
+            }
+            catch (Exception ex)
+            {
+                _drawerError = $"This couldn't be saved: {ex.Message}";
+                _drawerLocalLoginEnabled = true;
+            }
+        }
     }
 
     private async Task SaveDrawerUser()
@@ -831,7 +1220,7 @@ else
                 _drawerLocalLoginEnabled ? _drawerLocalUsername.Trim() : null);
             if (!string.IsNullOrEmpty(_drawerNewLocalPassword))
                 await UserAccountService.SetLocalPasswordAsync(_drawerUser.Id, _drawerNewLocalPassword);
-            await UserAccountService.AssignRoleGroupAsync(_drawerUser.Id, _drawerRoleGroupId, _drawerExpiryDate?.ToUniversalTime());
+            await UserAccountService.AssignRoleGroupAsync(_drawerUser.Id, _drawerRoleGroupId, DatePickerToEndOfDayUtc(_drawerExpiryDate));
             await ReloadRoleGroupsAsync();
             await ReloadUsersAsync();
             _drawerUser = null;
@@ -840,13 +1229,31 @@ else
         {
             _drawerError = ex.Message;
         }
+        catch (Exception ex)
+        {
+            _drawerError = $"This couldn't be saved: {ex.Message}";
+        }
     }
 
     private async Task DeactivateDrawerUser()
     {
         if (_drawerUser == null) return;
+        _drawerError = null;
         try
         {
+            // Local deactivation (blocking app sign-in) always happens
+            // regardless of what follows - the Entra-side disable is a
+            // best-effort addition on top, not a precondition. If it fails,
+            // the account is still correctly blocked from this app; only
+            // their access to other Microsoft services would be unaffected,
+            // which is worth surfacing rather than hiding.
+            if (!string.IsNullOrWhiteSpace(_drawerUser.EntraObjectId))
+            {
+                var graphResult = await GraphService.DisableUserAsync(_drawerUser.EntraObjectId);
+                if (!graphResult.Success)
+                    _drawerError = $"Account deactivated in this app, but disabling the Entra account failed: {graphResult.ErrorMessage}";
+            }
+
             await UserAccountService.DeactivateUserAccountAsync(_drawerUser.Id);
             await ReloadUsersAsync();
             _drawerUser = _userAccounts.FirstOrDefault(u => u.Id == _drawerUser.Id);
@@ -855,11 +1262,27 @@ else
         {
             _drawerError = ex.Message;
         }
+        catch (Exception ex)
+        {
+            _drawerError = $"This couldn't be saved: {ex.Message}";
+        }
     }
 
     private async Task ReactivateDrawerUser()
     {
         if (_drawerUser == null) return;
+        _drawerError = null;
+
+        // Mirrors DeactivateDrawerUser - re-enables the Entra account too,
+        // not just the local record, so Reactivate is a genuine undo of
+        // Deactivate rather than only half of one.
+        if (!string.IsNullOrWhiteSpace(_drawerUser.EntraObjectId))
+        {
+            var graphResult = await GraphService.EnableUserAsync(_drawerUser.EntraObjectId);
+            if (!graphResult.Success)
+                _drawerError = $"Account reactivated in this app, but re-enabling the Entra account failed: {graphResult.ErrorMessage}";
+        }
+
         await UserAccountService.ReactivateUserAccountAsync(_drawerUser.Id);
         await ReloadUsersAsync();
         _drawerUser = _userAccounts.FirstOrDefault(u => u.Id == _drawerUser.Id);
@@ -876,11 +1299,29 @@ else
     {
         if (_confirmDeleteUser == null) return;
         _drawerError = null;
+        _deletingUser = true;
         try
         {
-            await UserAccountService.DeleteUserAccountAsync(_confirmDeleteUser.Id);
+            if (_confirmDeleteUser.StaffId.HasValue)
+            {
+                var result = await OffboardingService.OffboardByUserAccountIdAsync(
+                    _confirmDeleteUser.Id, string.IsNullOrWhiteSpace(_deleteReason) ? null : _deleteReason.Trim());
+
+                if (result.Warnings.Count > 0)
+                {
+                    _offboardWarnings = result.Warnings;
+                    return; // stay open, show what actually happened
+                }
+            }
+            else
+            {
+                await UserAccountService.DeleteUserAccountAsync(_confirmDeleteUser.Id);
+            }
+
             _confirmDeleteUser = null;
             _drawerUser = null;
+            _deleteReason = "";
+            _offboardWarnings.Clear();
             await ReloadUsersAsync();
         }
         catch (InvalidOperationException ex)
@@ -888,6 +1329,14 @@ else
             // Stay on the small confirm popup - that's where the alert above
             // now actually shows this, immediately visible with no scrolling.
             _drawerError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _drawerError = $"This couldn't be saved: {ex.Message}";
+        }
+        finally
+        {
+            _deletingUser = false;
         }
     }
 
@@ -917,6 +1366,10 @@ else
         {
             _rgError = ex.Message;
         }
+        catch (Exception ex)
+        {
+            _rgError = $"This couldn't be saved: {ex.Message}";
+        }
     }
 
     private async Task DeleteRoleGroupConfirmed()
@@ -933,6 +1386,10 @@ else
         catch (InvalidOperationException ex)
         {
             _rgError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _rgError = $"This couldn't be saved: {ex.Message}";
         }
     }
 }

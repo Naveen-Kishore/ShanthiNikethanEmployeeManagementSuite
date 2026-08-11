@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/app.css?v=@AssetVersion" />
     <link rel="icon" type="image/png" href="favicon.png" />
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
@@ -22,7 +22,20 @@
     </div>
 
     <script src="_framework/blazor.web.js"></script>
-    <script src="js/theme.js"></script>
-    <script src="js/site.js"></script>
+    <script src="js/theme.js?v=@AssetVersion"></script>
+    <script src="js/site.js?v=@AssetVersion"></script>
 </body>
 </html>
+
+@code {
+    // A fresh value every time the app starts - not tied to a specific
+    // build number, but guarantees any JS/CSS file changed since the
+    // last restart is served under a genuinely new URL, so the browser
+    // can never keep serving a stale cached copy after a deploy. This is
+    // exactly the gap that caused the "configureIdleLogout not found"
+    // error - the updated site.js was on disk, but the browser had
+    // already cached the version from before that function existed.
+    // Computed once (static), shared across every request for the
+    // lifetime of this process.
+    private static readonly string AssetVersion = DateTime.UtcNow.Ticks.ToString();
+}

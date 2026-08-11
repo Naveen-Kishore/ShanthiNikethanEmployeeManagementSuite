@@ -1,8 +1,12 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.0.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShanthiNikethan.EmployeeManagement.Web", "ShanthiNikethan.EmployeeManagement.Web\ShanthiNikethan.EmployeeManagement.Web.csproj", "{B47C5F00-1234-4567-89AB-CDEF01234567}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShanthiNikethan.EmployeeManagement.Tests", "ShanthiNikethan.EmployeeManagement.Tests\ShanthiNikethan.EmployeeManagement.Tests.csproj", "{75FEDE2F-E286-46CD-94A0-E2B47A697721}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShanthiNikethan.EmployeeManagement.E2ETests", "ShanthiNikethan.EmployeeManagement.E2ETests\ShanthiNikethan.EmployeeManagement.E2ETests.csproj", "{4C238ADB-B329-4475-8765-E403E5F069FC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -14,5 +18,13 @@ Global
 		{B47C5F00-1234-4567-89AB-CDEF01234567}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B47C5F00-1234-4567-89AB-CDEF01234567}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B47C5F00-1234-4567-89AB-CDEF01234567}.Release|Any CPU.Build.0 = Release|Any CPU
+		{75FEDE2F-E286-46CD-94A0-E2B47A697721}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{75FEDE2F-E286-46CD-94A0-E2B47A697721}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{75FEDE2F-E286-46CD-94A0-E2B47A697721}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{75FEDE2F-E286-46CD-94A0-E2B47A697721}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C238ADB-B329-4475-8765-E403E5F069FC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C238ADB-B329-4475-8765-E403E5F069FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C238ADB-B329-4475-8765-E403E5F069FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C238ADB-B329-4475-8765-E403E5F069FC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -42,6 +42,11 @@
       "Enabled": true,
       "LicenseTier": "Base",
       "Description": "Searchable, filterable record of system activity - sign-ins, role changes, account changes, and other tracked actions. Grouped under Administration."
+    },
+    "AutomationRules": {
+      "Enabled": true,
+      "LicenseTier": "Base",
+      "Description": "Global-Admin-only definitions tying human-readable names to Entra groups, applied during staff onboarding/offboarding. Grouped under Administration."
     }
   }
 }

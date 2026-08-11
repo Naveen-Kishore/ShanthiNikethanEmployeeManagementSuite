@@ -1,98 +1,377 @@
 @inject IStaffProfileService StaffService
 @inject ICurrentUser CurrentUser
+@inject IOnboardingService OnboardingService
+@inject IUserAccountService UserAccountService
+@inject IGroupAutomationService AutomationService
+@inject IConfiguration Config
+@inject IJSRuntime JS
+@using ShanthiNikethan.EmployeeManagement.Modules.AutomationRules.Data
+@using ShanthiNikethan.EmployeeManagement.Modules.AutomationRules.Services
+@using ShanthiNikethan.EmployeeManagement.Modules.Admin.Data
 
 @if (Visible)
 {
     <div class="modal-backdrop" @onclick="Cancel">
         <div class="modal wide" @onclick:stopPropagation="true">
-            <h2>Add staff member</h2>
+            @if (_stage == "form")
+            {
+                <h2>Add staff member</h2>
 
-            <div class="form-grid">
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Full name *</label>
+                        <input type="text" @bind="_name" @bind:event="oninput" @onblur="CheckNameUniquenessAsync" placeholder="e.g. MALARKODI A" autocomplete="off" />
+                        @if (!string.IsNullOrEmpty(_nameUniqueNote))
+                        {
+                            <div class="stat-sub" style="color: var(--warning, #b8860b); margin-top: 4px;">@_nameUniqueNote</div>
+                        }
+                    </div>
+                    <div class="form-row">
+                        <label>Designation *</label>
+                        <select @bind="_designation" @bind:after="OnDesignationChanged">
+                            <option value="Teaching">Teaching</option>
+                            <option value="NonTeaching">Non-Teaching</option>
+                        </select>
+                    </div>
+                </div>
+
                 <div class="form-row">
-                    <label>Full name *</label>
-                    <input type="text" @bind="_name" @bind:event="oninput" placeholder="e.g. MALARKODI A" autocomplete="off" />
+                    <label>Username</label>
+                    <input type="text" @bind="_username" @bind:event="oninput" @bind:after="OnUsernameChanged" @onblur="CheckUsernameUniquenessAsync"
+                           placeholder="e.g. a.naveen" autocomplete="off" style="font-family: ui-monospace, monospace;" />
+                    @if (!string.IsNullOrEmpty(_usernameUniqueError))
+                    {
+                        <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_usernameUniqueError</div>
+                    }
+                </div>
+
+                <div class="form-row">
+                    <label>Sub-designation (optional)</label>
+                    <SubDesignationPicker Category="Enum.Parse<StaffDesignation>(_designation)" @bind-Value="_subDesignation" />
+                </div>
+
+                <div class="form-row">
+                    <label>Staff code (optional)</label>
+                    <input type="text" value="@_staffCode" @oninput="OnStaffCodeInput" @onblur="CheckStaffCodeUniquenessAsync" maxlength="20"
+                           placeholder="Leave blank to auto-generate (e.g. SNM-T-048)" style="font-family: ui-monospace, monospace;" />
+                    @if (!string.IsNullOrEmpty(_staffCodeUniqueError))
+                    {
+                        <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_staffCodeUniqueError</div>
+                    }
+                    else
+                    {
+                        <div class="stat-sub" style="margin-top:4px;">
+                            Letters, numbers, and - _ / . only — use this to match your own staff ID format instead of the default.
+                        </div>
+                    }
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Date of joining *</label>
+                        <input type="date" @bind="_dateOfJoining" />
+                    </div>
+                    <div class="form-row">
+                        <label>Phone number *</label>
+                        <input type="tel" @bind="_phone" @bind:event="oninput" placeholder="10-digit mobile" autocomplete="off" maxlength="10" />
+                        @if (!string.IsNullOrEmpty(_phone) && !PhoneIsValidFormat)
+                        {
+                            <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">Must be a valid 10-digit Indian mobile number, starting with 6, 7, 8, or 9.</div>
+                        }
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Aadhaar number *</label>
+                        <input type="text" value="@_aadhaar" @oninput="OnAadhaarInput" @onblur="CheckAadhaarUniquenessAsync" placeholder="12-digit number" maxlength="12"
+                               style="font-family: ui-monospace, monospace;" autocomplete="off" />
+                        @if (!string.IsNullOrEmpty(_aadhaar) && !AadhaarIsValidFormat)
+                        {
+                            <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">Must be exactly 12 digits.</div>
+                        }
+                        else if (!string.IsNullOrEmpty(_aadhaarUniqueError))
+                        {
+                            <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_aadhaarUniqueError</div>
+                        }
+                    </div>
+                    <div class="form-row">
+                        <label>PAN number (optional)</label>
+                        <input type="text" value="@_pan" @oninput="OnPanInput" @onblur="CheckPanUniquenessAsync" placeholder="ABCDE1234F — leave blank if not available" maxlength="10"
+                               style="font-family: ui-monospace, monospace; text-transform: uppercase;" autocomplete="off" />
+                        @if (!string.IsNullOrEmpty(_pan) && !PanIsValidFormat)
+                        {
+                            <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">Doesn't match the standard PAN format (5 letters, 4 digits, 1 letter).</div>
+                        }
+                        else if (!string.IsNullOrEmpty(_panUniqueError))
+                        {
+                            <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_panUniqueError</div>
+                        }
+                    </div>
+                </div>
+                <p class="stat-sub" style="margin-top: -8px;">
+                    Aadhaar reliably tells staff apart even when names are spelled or formatted differently by whoever's
+                    entering them. PAN is optional at this step — some non-teaching staff may not have one on hand yet;
+                    it can be added later from this profile whenever it's available.
+                </p>
+
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Bank account number *</label>
+                        <input type="text" @bind="_accountNumber" @bind:event="oninput" placeholder="Type account number" autocomplete="off" />
+                    </div>
+                    <div class="form-row">
+                        <label>Bank IFSC code *</label>
+                        <input type="text" value="@_ifsc" @oninput="OnIfscInput" placeholder="e.g. SBIN0001234" maxlength="11"
+                               style="font-family: ui-monospace, monospace; text-transform: uppercase;" autocomplete="off" />
+                        @if (!string.IsNullOrEmpty(_ifsc) && !IfscIsValidFormat)
+                        {
+                            <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">Must be 11 characters: 4 letters, then 0, then 6 letters/digits.</div>
+                        }
+                    </div>
                 </div>
                 <div class="form-row">
-                    <label>Designation *</label>
-                    <select @bind="_designation" @bind:after="OnDesignationChanged">
-                        <option value="Teaching">Teaching</option>
-                        <option value="NonTeaching">Non-Teaching</option>
-                    </select>
+                    <label>Re-type bank account number *</label>
+                    <input type="text" @bind="_accountNumberConfirm" @bind:event="oninput" @onblur="CheckAccountNumberUniquenessAsync" placeholder="Must match exactly" autocomplete="off" />
+                    @if (!string.IsNullOrEmpty(_accountNumberConfirm) && _accountNumber != _accountNumberConfirm)
+                    {
+                        <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">Account numbers do not match.</div>
+                    }
+                    else if (!string.IsNullOrEmpty(_accountNumberUniqueError))
+                    {
+                        <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">@_accountNumberUniqueError</div>
+                    }
                 </div>
-            </div>
 
-            <div class="form-row">
-                <label>Sub-designation (optional)</label>
-                <SubDesignationPicker Category="Enum.Parse<StaffDesignation>(_designation)" @bind-Value="_subDesignation" />
-            </div>
-
-            <div class="form-row">
-                <label>Staff code (optional)</label>
-                <input type="text" value="@_staffCode" @oninput="OnStaffCodeInput" maxlength="20"
-                       placeholder="Leave blank to auto-generate (e.g. SNM-T-048)" style="font-family: ui-monospace, monospace;" />
-                <div class="stat-sub" style="margin-top:4px;">
-                    Letters, numbers, and - _ / . only — use this to match your own staff ID format instead of the default.
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>EPF UAN (optional)</label>
+                        <input type="text" @bind="_epfUan" @bind:event="oninput" placeholder="Leave blank if not available yet" autocomplete="off" />
+                    </div>
+                    <div class="form-row">
+                        <label>ESIC number (optional)</label>
+                        <input type="text" @bind="_esicNumber" @bind:event="oninput" placeholder="Leave blank if not available yet" autocomplete="off" />
+                    </div>
                 </div>
-            </div>
+                <p class="stat-sub" style="margin-top: -8px;">
+                    Both can also be added or changed later from this profile — EPF/ESIC enrollment automatically
+                    follows whichever of these has a value on file, no separate switch needed.
+                </p>
 
-            <div class="form-grid">
-                <div class="form-row">
-                    <label>Date of joining *</label>
-                    <input type="date" @bind="_dateOfJoining" />
+                <div class="form-grid">
+                    @if (CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
+                    {
+                        <div class="form-row">
+                            <label>Payment mode</label>
+                            <select @bind="_bankMode">
+                                <option value="IobBulkUpload">IOB bulk upload</option>
+                                <option value="ManualNeft">Manual NEFT/RTGS</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Gross pay (₹)</label>
+                            <input type="number" @bind="_grossPay" min="0" step="1" placeholder="Leave 0 if unknown yet" />
+                        </div>
+                    }
                 </div>
-                <div class="form-row">
-                    <label>Phone number</label>
-                    <input type="tel" @bind="_phone" @bind:event="oninput" placeholder="10-digit mobile" autocomplete="off" />
-                </div>
-            </div>
 
-            <div class="form-row">
-                <label>Bank account number *</label>
-                <input type="text" @bind="_accountNumber" @bind:event="oninput" placeholder="Type account number" autocomplete="off" />
-            </div>
-            <div class="form-row">
-                <label>Re-type bank account number *</label>
-                <input type="text" @bind="_accountNumberConfirm" @bind:event="oninput" placeholder="Must match exactly" autocomplete="off" />
-                @if (!string.IsNullOrEmpty(_accountNumberConfirm) && _accountNumber != _accountNumberConfirm)
+                @if (!CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
                 {
-                    <div class="stat-sub" style="color: var(--danger); margin-top: 4px;">Account numbers do not match.</div>
+                @* Text removed here per feedback - Office Admin doesn't need to know salary is managed through this app at all. *@
                 }
-            </div>
 
-            <div class="form-grid">
-                <div class="form-row">
-                    <label>Payment mode</label>
-                    <select @bind="_bankMode">
-                        <option value="IobBulkUpload">IOB bulk upload</option>
-                        <option value="ManualNeft">Manual NEFT/RTGS</option>
-                    </select>
+                <div class="form-row" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" style="width: auto;" @bind="_enableSignIn" @bind:after="OnEnableSignInChanged" />
+                        <span>Enable sign-in for this person</span>
+                    </label>
+                    <p class="stat-sub" style="margin-top: 4px;">
+                        Creates a brand-new Entra account for them automatically — the username you enter below
+                        becomes their sign-in address, and any group memberships you select get applied to it.
+                    </p>
                 </div>
-                @if (CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
+
+                @if (_enableSignIn)
                 {
                     <div class="form-row">
-                        <label>Gross pay (₹)</label>
-                        <input type="number" @bind="_grossPay" min="0" step="1" placeholder="Leave 0 if unknown yet" />
+                        <label>Sign-in username (UPN) *</label>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <input type="text" @bind="_upnUsername" @bind:event="oninput"
+                                   placeholder="a.naveen" autocomplete="off"
+                                   style="font-family: ui-monospace, monospace; flex: 1; min-width: 0;" />
+                            <span style="font-family: ui-monospace, monospace; color: var(--text-muted, #767676);">@@</span>
+                            <input type="text" value="@_domain" readonly disabled
+                                   style="font-family: ui-monospace, monospace; flex: 1; min-width: 0; background: var(--bg-surface-alt); color: var(--text-muted, #767676); cursor: not-allowed;" />
+                        </div>
+                        <p class="stat-sub" style="margin-top: 4px;">Domain is fixed to your organization's own — only the part before @@ needs typing.</p>
+                    </div>
+
+                    @if (_availableRules.Count > 0)
+                    {
+                        <div class="form-row">
+                            <label>Group memberships to assign</label>
+                            @foreach (var rule in _availableRules)
+                            {
+                                <label style="display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer;">
+                                    <input type="checkbox" style="width: auto;" checked="@_selectedRuleIds.Contains(rule.Id)"
+                                           @onchange="e => ToggleRule(rule.Id, (bool)(e.Value ?? false))" />
+                                    <span>@rule.RuleName</span>
+                                </label>
+                            }
+                        </div>
+                    }
+                }
+
+                @if (CurrentUser.HasPermission("Admin.ManageUsers"))
+                {
+                    <div class="form-row" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" style="width: auto;" @bind="_enableLocalLogin" @bind:after="OnEnableLocalLoginChanged" disabled="@_enableSignIn" />
+                            <span>Enable local login (Global Admin only — break-glass fallback)</span>
+                        </label>
+                        <p class="stat-sub" style="margin-top: 4px;">
+                            @(_enableSignIn
+                                ? "Not available while Entra sign-in is enabled above — the two are mutually exclusive by design."
+                                : "Office Admin never sees this option, at creation or later — only visible here because you're a Global Administrator.")
+                        </p>
+                    </div>
+
+                    @if (_enableLocalLogin)
+                    {
+                        <div class="form-row">
+                            <label>Local password *</label>
+                            <input type="password" @bind="_localPassword" @bind:event="oninput" placeholder="At least 8 characters" autocomplete="new-password" />
+                        </div>
+                    }
+                }
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div class="alert danger">@_error</div>
+                }
+
+                <div class="modal-actions">
+                    <button type="button" class="secondary" @onclick="Cancel">Cancel</button>
+                    <button type="button" class="primary" @onclick="SaveAsync" disabled="@(!CanSave || _saving)">
+                        @(_saving ? "Saving…" : "Add staff")
+                    </button>
+                </div>
+            }
+            else if (_stage == "duplicate-warning")
+            {
+                <h2>Possible duplicate</h2>
+                @if (_duplicateIsSoftDeleted && _duplicateMatch != null)
+                {
+                    <div class="alert warning">
+                        A staff member named <strong>"@_name"</strong> was previously removed
+                        @(_duplicateMatch.SoftDeletedAtUtc.HasValue ? $"on {_duplicateMatch.SoftDeletedAtUtc.Value:dd MMM yyyy}" : "")
+                        @(!string.IsNullOrEmpty(_duplicateMatch.SoftDeleteReason) ? $" — \"{_duplicateMatch.SoftDeleteReason}\"" : "").
+                        Did you mean to reactivate that profile from the soft-deleted list instead of creating a new one?
                     </div>
                 }
-            </div>
-
-            @if (!CurrentUser.HasPermission("StaffDirectory.ViewFinancials"))
-            {
-                <div class="stat-sub">Salary setup is completed separately by an administrator.</div>
+                else if (_duplicateMatch != null)
+                {
+                    <div class="alert warning">
+                        An active staff member named <strong>"@_name"</strong> already exists (@_duplicateMatch.StaffCode).
+                        If this is genuinely a different person who happens to share the name, you can proceed —
+                        otherwise, use the existing profile instead of creating a new one.
+                    </div>
+                }
+                <div class="modal-actions">
+                    <button type="button" class="secondary" @onclick='() => _stage = "form"'>Go back</button>
+                    <button type="button" class="primary" @onclick="ProceedWithCreationAsync" disabled="@_saving">
+                        @(_saving ? "Creating…" : "Create anyway")
+                    </button>
+                </div>
             }
-            <div class="stat-sub">EPF and ESIC enrollment are set later from the staff profile's Statutory tab, once you have their UAN / ESIC number.</div>
-
-            @if (!string.IsNullOrEmpty(_error))
+            else if (_stage == "provisioning")
             {
-                <div class="alert danger">@_error</div>
+                <h2>Setting up sign-in…</h2>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 30px 0;">
+                    <div class="spinner" style="width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                    <p class="stat-sub">@_provisioningStatus</p>
+                </div>
             }
+            else
+            {
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                    <div style="width: 28px; height: 28px; border-radius: 50%; background: var(--success, #1a9c5c); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                        <Icon Name="check" Size="16" Style="color: #fff;" />
+                    </div>
+                    <h2 style="margin: 0;">Staff profile created</h2>
+                </div>
 
-            <div class="modal-actions">
-                <button type="button" class="secondary" @onclick="Cancel">Cancel</button>
-                <button type="button" class="primary" @onclick="SaveAsync" disabled="@(!CanSave || _saving)">
-                    @(_saving ? "Saving…" : "Add staff")
-                </button>
-            </div>
+                @if (_enableSignIn && _createdCredentials != null)
+                {
+                    <div class="calc-panel" style="margin-top: 14px;">
+                        <div class="form-row">
+                            <label>Username</label>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-family: ui-monospace, monospace;">@_upn</span>
+                                <button type="button" class="icon-btn" title="Copy" @onclick="() => CopyToClipboard(_upn)">@CopyIconMarkup</button>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label>Temporary password</label>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-family: ui-monospace, monospace; letter-spacing: @(_showPassword ? "normal" : "2px"); display: inline-block; min-width: 130px;">
+                                    @(_showPassword ? _createdCredentials : new string('•', _createdCredentials?.Length ?? 10))
+                                </span>
+                                <button type="button" class="icon-btn" title="@(_showPassword ? "Hide" : "Show")" @onclick="() => _showPassword = !_showPassword">
+                                    <Icon Name="@(_showPassword ? "eye-off" : "eye")" Size="14" />
+                                </button>
+                                <button type="button" class="icon-btn" title="Copy" @onclick="() => CopyToClipboard(_createdCredentials)">@CopyIconMarkup</button>
+                            </div>
+                        </div>
+                        <p class="stat-sub" style="margin-top: 6px;">
+                            They'll be asked to set their own password on first sign-in — share these with them directly,
+                            this won't be shown again.
+                        </p>
+                    </div>
+
+                    @if (_provisioningWarnings.Count > 0)
+                    {
+                        <div class="alert warning" style="margin-top: 12px;">
+                            <strong>Sign-in was created, but a few things need a second look:</strong>
+                            <ul style="margin: 6px 0 0 18px; padding: 0;">
+                                @foreach (var w in _provisioningWarnings)
+                                {
+                                    <li>@w</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                }
+                else if (_enableSignIn && _createdCredentials == null)
+                {
+                    <div class="alert danger" style="margin-top: 14px;">
+                        The staff profile was created successfully, but sign-in setup failed: @_error
+                        <br />You can try enabling sign-in again later from this staff member's profile.
+                    </div>
+                }
+                else if (_enableLocalLogin)
+                {
+                    @if (_provisioningWarnings.Count > 0)
+                    {
+                        <div class="alert warning" style="margin-top: 14px;">
+                            @foreach (var w in _provisioningWarnings)
+                            {
+                                <div>@w</div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert success" style="margin-top: 14px;">
+                            Local login created for username <strong>@_username</strong>. Share the password you set with them directly.
+                        </div>
+                    }
+                }
+
+                <div class="modal-actions">
+                    <button type="button" class="primary" @onclick="FinishAndClose">Done</button>
+                </div>
+            }
         </div>
     </div>
 }
@@ -109,21 +388,294 @@
     private DateOnly _dateOfJoining = DateOnly.FromDateTime(DateTime.Today);
     private string _phone = "";
     private string _accountNumber = "";
+    private string _pan = "";
+    private string _aadhaar = "";
+    private string _ifsc = "";
+    private string _epfUan = "";
+    private string _esicNumber = "";
+
+    private bool PanIsValidFormat => System.Text.RegularExpressions.Regex.IsMatch(_pan, @"^[A-Z]{5}[0-9]{4}[A-Z]$");
+    private bool PhoneIsValidFormat => System.Text.RegularExpressions.Regex.IsMatch(_phone, @"^[6-9]\d{9}$");
+    private bool IfscIsValidFormat => System.Text.RegularExpressions.Regex.IsMatch(_ifsc, @"^[A-Z]{4}0[A-Z0-9]{6}$");
+    private string? _nameUniqueNote;
+    private string? _aadhaarUniqueError;
+    private string? _panUniqueError;
+    private string? _usernameUniqueError;
+    private string? _accountNumberUniqueError;
+    private string? _staffCodeUniqueError;
+    private bool AadhaarIsValidFormat => System.Text.RegularExpressions.Regex.IsMatch(_aadhaar, @"^[0-9]{12}$");
     private string _accountNumberConfirm = "";
     private string _bankMode = "IobBulkUpload";
     private decimal _grossPay = 0;
     private string? _error;
     private bool _saving;
 
+    // ---- Sign-in onboarding ----
+    private string _username = "";
+    private string _lastAutoFilledUpnUsername = "";
+    private bool _enableSignIn;
+    private string _upnUsername = "";
+    private string _domain = "";
+    private string _upn => $"{_upnUsername.Trim()}@{_domain}";
+    private bool _showPassword;
+    private bool _enableLocalLogin;
+    private string _localPassword = "";
+
+    private static readonly Microsoft.AspNetCore.Components.MarkupString CopyIconMarkup = new(
+        "<svg width=\"14\" height=\"14\" viewBox=\"0 0 48 48\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">" +
+        "<path d=\"M11.5004 10.3757L11.5 33.75C11.5 37.4779 14.5221 40.5 18.25 40.5L33.6239 40.5006C32.9567 41.9745 31.4731 43 29.75 43H18.25C13.1414 43 9 38.8586 9 33.75V14.25C9 12.5265 10.0259 11.0426 11.5004 10.3757ZM25.7574 5C26.8845 5 27.9655 5.44777 28.7626 6.2448L37.7552 15.2374C38.5522 16.0345 39 17.1155 39 18.2426V33.75C39 36.0972 37.0972 38 34.75 38H18.25C15.9028 38 14 36.0972 14 33.75V9.25C14 6.90279 15.9028 5 18.25 5H25.7574ZM25 7.5H18.25C17.2835 7.5 16.5 8.2835 16.5 9.25V33.75C16.5 34.7165 17.2835 35.5 18.25 35.5H34.75C35.7165 35.5 36.5 34.7165 36.5 33.75V19H29.25C26.9718 19 25.1123 17.2075 25.0049 14.9559L25 14.75V7.5ZM35.482 16.5L27.5 8.518V14.75C27.5 15.6682 28.2071 16.4212 29.1065 16.4942L29.25 16.5H35.482Z\" fill=\"currentColor\"/>" +
+        "</svg>");
+    private List<GroupAutomationRule> _availableRules = new();
+    private HashSet<Guid> _selectedRuleIds = new();
+    private bool _wasVisible;
+
+    // "form" -> "provisioning" -> "success"
+    private string _stage = "form";
+    private string _provisioningStatus = "";
+    private Staff? _duplicateMatch;
+    private bool _duplicateIsSoftDeleted;
+    private List<string> _provisioningWarnings = new();
+    private string? _createdCredentials;
+
     private bool CanSave =>
         !string.IsNullOrWhiteSpace(_name) &&
+        !string.IsNullOrWhiteSpace(_phone) &&
+        PhoneIsValidFormat &&
         !string.IsNullOrWhiteSpace(_accountNumber) &&
-        _accountNumber == _accountNumberConfirm;
+        _accountNumber == _accountNumberConfirm &&
+        string.IsNullOrEmpty(_accountNumberUniqueError) &&
+        !string.IsNullOrWhiteSpace(_ifsc) &&
+        IfscIsValidFormat &&
+        string.IsNullOrEmpty(_staffCodeUniqueError) &&
+        AadhaarIsValidFormat &&
+        string.IsNullOrEmpty(_aadhaarUniqueError) &&
+        (string.IsNullOrEmpty(_pan) || PanIsValidFormat) &&
+        string.IsNullOrEmpty(_panUniqueError) &&
+        string.IsNullOrEmpty(_usernameUniqueError) &&
+        (!_enableSignIn || !string.IsNullOrWhiteSpace(_upnUsername)) &&
+        (!_enableLocalLogin || (!string.IsNullOrWhiteSpace(_localPassword) && _localPassword.Length >= 8));
+
+    // Keeps the UPN username in sync with the plain Username field
+    // whenever sign-in is enabled - but only while the office admin
+    // hasn't deliberately typed something different into the UPN field
+    // itself, tracked via _lastAutoFilledUpnUsername so a genuine manual
+    // edit there never gets silently overwritten.
+    private void OnUsernameChanged()
+    {
+        if (_enableSignIn && (string.IsNullOrWhiteSpace(_upnUsername) || _upnUsername == _lastAutoFilledUpnUsername))
+        {
+            _upnUsername = _username;
+            _lastAutoFilledUpnUsername = _username;
+        }
+    }
+
+    // Fires on blur, not every keystroke - these all need a database
+    // round trip, so checking only when the person actually leaves the
+    // field (rather than on every character typed) keeps this from
+    // hammering the database while someone's still mid-word.
+    private async Task CheckNameUniquenessAsync()
+    {
+        _nameUniqueNote = null;
+        if (string.IsNullOrWhiteSpace(_name)) return;
+        var normalized = _name.Trim().ToUpperInvariant();
+
+        var active = await StaffService.ListActiveAsync(searchTerm: _name.Trim());
+        var match = active.FirstOrDefault(s => s.DisplayName == normalized);
+        if (match != null)
+        {
+            // Non-blocking, informational only - two different people CAN
+            // genuinely share a name. The definitive gate (with an actual
+            // confirm-to-proceed step) still happens at save time; this is
+            // just an early heads-up so it's not a surprise later.
+            _nameUniqueNote = $"An active staff member named \"{match.DisplayName}\" already exists.";
+            return;
+        }
+
+        var softDeleted = await StaffService.ListSoftDeletedAsync();
+        var softMatch = softDeleted.FirstOrDefault(s => s.DisplayName == normalized);
+        if (softMatch != null)
+            _nameUniqueNote = $"A staff member named \"{softMatch.DisplayName}\" was previously removed — check the soft-deleted list.";
+    }
+
+    private async Task CheckAadhaarUniquenessAsync()
+    {
+        _aadhaarUniqueError = null;
+        if (string.IsNullOrWhiteSpace(_aadhaar) || !AadhaarIsValidFormat) return;
+
+        var allActive = await StaffService.ListActiveAsync();
+        var allSoftDeleted = await StaffService.ListSoftDeletedAsync();
+        var match = allActive.Concat(allSoftDeleted).FirstOrDefault(s => s.AadhaarNumber == _aadhaar);
+        if (match != null)
+            _aadhaarUniqueError = $"Already on file for \"{match.DisplayName}\".";
+    }
+
+    private async Task CheckPanUniquenessAsync()
+    {
+        _panUniqueError = null;
+        if (string.IsNullOrWhiteSpace(_pan) || !PanIsValidFormat) return;
+
+        var allActive = await StaffService.ListActiveAsync();
+        var allSoftDeleted = await StaffService.ListSoftDeletedAsync();
+        var match = allActive.Concat(allSoftDeleted).FirstOrDefault(s => s.PanNumber == _pan);
+        if (match != null)
+            _panUniqueError = $"Already on file for \"{match.DisplayName}\".";
+    }
+
+    private async Task CheckUsernameUniquenessAsync()
+    {
+        _usernameUniqueError = null;
+        if (string.IsNullOrWhiteSpace(_username)) return;
+        var typed = _username.Trim();
+
+        var accountMatch = await UserAccountService.FindAnyAccountByUsernameAsync(typed);
+        if (accountMatch != null)
+        {
+            _usernameUniqueError = $"Already in use by \"{accountMatch.DisplayName}\".";
+            return;
+        }
+
+        var allActive = await StaffService.ListActiveAsync();
+        var allSoftDeleted = await StaffService.ListSoftDeletedAsync();
+        var match = allActive.Concat(allSoftDeleted).FirstOrDefault(s => s.Username == typed);
+        if (match != null)
+            _usernameUniqueError = $"Already used by \"{match.DisplayName}\".";
+    }
+
+    private async Task CheckAccountNumberUniquenessAsync()
+    {
+        _accountNumberUniqueError = null;
+        // Only checked once both fields actually match - checking before
+        // that would be checking a value the person hasn't finished typing.
+        if (string.IsNullOrWhiteSpace(_accountNumber) || _accountNumber != _accountNumberConfirm) return;
+
+        var allActive = await StaffService.ListActiveAsync();
+        var allSoftDeleted = await StaffService.ListSoftDeletedAsync();
+        var match = allActive.Concat(allSoftDeleted).FirstOrDefault(s => s.BankAccountNumber == _accountNumber.Trim());
+        if (match != null)
+            _accountNumberUniqueError = $"A staff member with account number {_accountNumber.Trim()} already exists (\"{match.DisplayName}\").";
+    }
+
+    private async Task CheckStaffCodeUniquenessAsync()
+    {
+        _staffCodeUniqueError = null;
+        if (string.IsNullOrWhiteSpace(_staffCode)) return;
+
+        var allActive = await StaffService.ListActiveAsync();
+        var allSoftDeleted = await StaffService.ListSoftDeletedAsync();
+        var match = allActive.Concat(allSoftDeleted).FirstOrDefault(s => s.StaffCode == _staffCode.Trim());
+        if (match != null)
+            _staffCodeUniqueError = $"Already used by \"{match.DisplayName}\".";
+    }
+
+    private void OnEnableSignInChanged()
+    {
+        if (_enableSignIn)
+        {
+            if (string.IsNullOrWhiteSpace(_upnUsername))
+            {
+                _upnUsername = _username;
+                _lastAutoFilledUpnUsername = _username;
+            }
+            // Mutually exclusive with local login, same rule as everywhere
+            // else in this app - an Entra-provisioned account and a local
+            // fallback account are two different things, never both.
+            _enableLocalLogin = false;
+            _localPassword = "";
+        }
+    }
+
+    private void OnEnableLocalLoginChanged()
+    {
+        if (_enableLocalLogin)
+        {
+            _enableSignIn = false;
+        }
+        else
+        {
+            _localPassword = "";
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Loads fresh each time the dialog opens (not just once at page
+        // load) so a rule Global Admin just added shows up without needing
+        // a full page refresh.
+        if (Visible && !_wasVisible)
+        {
+            _domain = Config["AzureAd:Domain"] ?? "";
+            _availableRules = await AutomationService.ListRulesAsync(enabledOnly: true);
+        }
+        _wasVisible = Visible;
+    }
+
+    private void ToggleRule(Guid ruleId, bool isChecked)
+    {
+        if (isChecked) _selectedRuleIds.Add(ruleId);
+        else _selectedRuleIds.Remove(ruleId);
+    }
 
     private async Task SaveAsync()
     {
         _error = null;
         if (!CanSave) return;
+
+        // Checked first, and stronger than the name check below: Aadhaar
+        // (always present, since it's required) and PAN (when provided)
+        // are unique per person by design - unlike a name, which two
+        // genuinely different people can share. No override offered for
+        // this specific case; the correct fix for a real false positive
+        // is correcting the EXISTING record, not creating a second one
+        // carrying the same government ID.
+        var allActive = await StaffService.ListActiveAsync();
+        var allSoftDeleted = await StaffService.ListSoftDeletedAsync();
+        var allStaff = allActive.Concat(allSoftDeleted).ToList();
+
+        var aadhaarMatch = allStaff.FirstOrDefault(s => !string.IsNullOrEmpty(s.AadhaarNumber) && s.AadhaarNumber == _aadhaar);
+        var panMatch = string.IsNullOrEmpty(_pan) ? null : allStaff.FirstOrDefault(s => !string.IsNullOrEmpty(s.PanNumber) && s.PanNumber == _pan);
+        var usernameMatch = string.IsNullOrEmpty(_username) ? null : allStaff.FirstOrDefault(s => !string.IsNullOrEmpty(s.Username) && s.Username == _username.Trim());
+
+        if (aadhaarMatch != null || panMatch != null || usernameMatch != null)
+        {
+            var match = aadhaarMatch ?? panMatch ?? usernameMatch!;
+            var whichId = aadhaarMatch != null ? "Aadhaar number" : panMatch != null ? "PAN number" : "Username";
+            _error = $"This {whichId} is already on file for \"{match.DisplayName}\"" +
+                     (match.IsActive ? "" : " (soft-deleted)") +
+                     " — use that existing profile instead of creating a new one.";
+            return;
+        }
+
+        // Checked before creating anything - previously nothing stopped
+        // two Staff profiles existing for what's actually the same person,
+        // including when an earlier one had simply been soft-deleted
+        // rather than genuinely being a different individual. Exact name
+        // match only (not fuzzy) - DisplayName is always stored uppercase,
+        // matched the same way here.
+        var normalizedName = _name.Trim().ToUpperInvariant();
+        var exactActive = allActive.Where(s => s.DisplayName == normalizedName).ToList();
+
+        if (exactActive.Count > 0)
+        {
+            _duplicateMatch = exactActive[0];
+            _duplicateIsSoftDeleted = false;
+            _stage = "duplicate-warning";
+            return;
+        }
+
+        var exactSoftDeleted = allSoftDeleted.Where(s => s.DisplayName == normalizedName).ToList();
+        if (exactSoftDeleted.Count > 0)
+        {
+            _duplicateMatch = exactSoftDeleted[0];
+            _duplicateIsSoftDeleted = true;
+            _stage = "duplicate-warning";
+            return;
+        }
+
+        await ProceedWithCreationAsync();
+    }
+
+    private async Task ProceedWithCreationAsync()
+    {
         _saving = true;
         try
         {
@@ -135,17 +687,60 @@
                 Designation = Enum.Parse<StaffDesignation>(_designation),
                 SubDesignation = _subDesignation,
                 StaffCode = _staffCode,
+                Username = string.IsNullOrWhiteSpace(_username) ? null : _username.Trim(),
                 DateOfJoining = _dateOfJoining,
-                PhoneNumber = string.IsNullOrWhiteSpace(_phone) ? null : _phone.Trim(),
+                PhoneNumber = _phone.Trim(),
                 BankAccountNumber = _accountNumber.Trim(),
+                BankIfscCode = _ifsc,
                 BankMode = Enum.Parse<BankPaymentMode>(_bankMode),
-                GrossPay = _grossPay
+                GrossPay = _grossPay,
+                PanNumber = string.IsNullOrWhiteSpace(_pan) ? null : _pan,
+                AadhaarNumber = _aadhaar,
+                EpfUan = string.IsNullOrWhiteSpace(_epfUan) ? null : _epfUan.Trim(),
+                EsicNumber = string.IsNullOrWhiteSpace(_esicNumber) ? null : _esicNumber.Trim()
             };
 
             var created = await StaffService.CreateAsync(staff);
             await OnCreated.InvokeAsync(created);
-            ResetForm();
-            await VisibleChanged.InvokeAsync(false);
+            _provisioningWarnings.Clear();
+
+            // Staff profile creation is already complete and successful at
+            // this point, regardless of what happens next - sign-in
+            // provisioning is a separate, best-effort step layered on top,
+            // not something that rolls back the staff record if it fails.
+            if (_enableSignIn)
+            {
+                _stage = "provisioning";
+                StateHasChanged();
+                await ProvisionSignInAsync(staff);
+            }
+            else if (_enableLocalLogin)
+            {
+                // Global-Admin-only path, entirely separate from the Entra
+                // flow above - a direct local account, no Graph/Entra
+                // involvement at all, matching how local fallback accounts
+                // have always worked elsewhere in this app.
+                var regularStaffGroup = (await UserAccountService.ListRoleGroupsAsync())
+                    .FirstOrDefault(g => g.Name == "Regular Staff");
+
+                if (regularStaffGroup == null)
+                {
+                    _provisioningWarnings.Add("Couldn't find the \"Regular Staff\" role group — the staff profile was created, but no local login was linked. Set this up manually from Access Management.");
+                }
+                else
+                {
+                    await UserAccountService.CreateUserAccountAsync(new UserAccount
+                    {
+                        DisplayName = staff.DisplayName,
+                        StaffId = staff.Id,
+                        LocalLoginEnabled = true,
+                        LocalUsername = _username.Trim(),
+                        RoleGroupId = regularStaffGroup.Id
+                    }, _localPassword);
+                }
+            }
+
+            _stage = "success";
         }
         catch (Exception ex)
         {
@@ -157,8 +752,49 @@
         }
     }
 
+    private async Task ProvisionSignInAsync(Staff staff)
+    {
+        _provisioningWarnings.Clear();
+
+        // Delegates to IOnboardingService now, rather than doing this work
+        // inline - this is the shared logic also used by the retroactive
+        // "Enable sign-in" flow on an already-existing staff member's
+        // profile drawer. The onProgress callback preserves the exact
+        // same step-by-step status text this method always showed; the
+        // service does the actual work, this method just reflects it.
+        var result = await OnboardingService.EnableSignInAsync(
+            staff.Id,
+            staff.DisplayName,
+            _upn.Trim(),
+            _selectedRuleIds.ToList(),
+            onProgress: status =>
+            {
+                _provisioningStatus = status;
+                StateHasChanged();
+            });
+
+        _provisioningWarnings = result.Warnings;
+        _createdCredentials = result.Success ? result.TemporaryPassword : null;
+        if (!result.Success)
+            _error = result.ErrorMessage;
+    }
+
+    private async Task CopyToClipboard(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        await JS.InvokeVoidAsync("siteHelpers.copyText", text);
+    }
+
+    private async Task FinishAndClose()
+    {
+        ResetForm();
+        _stage = "form";
+        await VisibleChanged.InvokeAsync(false);
+    }
+
     private async Task Cancel()
     {
+        if (_stage != "form") return; // no backing out mid-provisioning or after success - use Done instead
         ResetForm();
         await VisibleChanged.InvokeAsync(false);
     }
@@ -172,12 +808,45 @@
         _staffCode = sanitized.Length > 20 ? sanitized[..20] : sanitized;
     }
 
+    // Forgiving of stray spaces/dashes someone might type or paste from a
+    // scanned document - stripped out rather than rejected outright, since
+    // the actual PAN/Aadhaar characters are what matters for the format
+    // and uniqueness checks, not incidental formatting.
+    private void OnPanInput(ChangeEventArgs e)
+    {
+        var raw = (e.Value?.ToString() ?? "").ToUpperInvariant();
+        var sanitized = System.Text.RegularExpressions.Regex.Replace(raw, @"[^A-Z0-9]", "");
+        _pan = sanitized.Length > 10 ? sanitized[..10] : sanitized;
+    }
+
+    private void OnAadhaarInput(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString() ?? "";
+        var sanitized = System.Text.RegularExpressions.Regex.Replace(raw, @"[^0-9]", "");
+        _aadhaar = sanitized.Length > 12 ? sanitized[..12] : sanitized;
+    }
+
+    private void OnIfscInput(ChangeEventArgs e)
+    {
+        var raw = (e.Value?.ToString() ?? "").ToUpperInvariant();
+        var sanitized = System.Text.RegularExpressions.Regex.Replace(raw, @"[^A-Z0-9]", "");
+        _ifsc = sanitized.Length > 11 ? sanitized[..11] : sanitized;
+    }
+
     private void ResetForm()
     {
         _name = ""; _phone = ""; _accountNumber = ""; _accountNumberConfirm = "";
         _designation = "Teaching"; _subDesignation = null; _bankMode = "IobBulkUpload"; _grossPay = 0;
-        _staffCode = "";
+        _staffCode = ""; _pan = ""; _aadhaar = ""; _ifsc = ""; _epfUan = ""; _esicNumber = "";
+        _nameUniqueNote = null; _aadhaarUniqueError = null; _panUniqueError = null; _usernameUniqueError = null;
+        _accountNumberUniqueError = null; _staffCodeUniqueError = null;
         _dateOfJoining = DateOnly.FromDateTime(DateTime.Today);
         _error = null;
+        _username = ""; _lastAutoFilledUpnUsername = "";
+        _enableSignIn = false; _upnUsername = ""; _selectedRuleIds.Clear();
+        _enableLocalLogin = false; _localPassword = "";
+        _showPassword = false;
+        _createdCredentials = null; _provisioningWarnings.Clear(); _provisioningStatus = "";
+        _duplicateMatch = null; _duplicateIsSoftDeleted = false;
     }
 }

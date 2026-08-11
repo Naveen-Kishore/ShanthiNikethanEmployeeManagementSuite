@@ -1,12 +1,17 @@
 @inherits LayoutComponentBase
 @implements IAsyncDisposable
+@using ShanthiNikethan.EmployeeManagement.Core.Modules
+@using ShanthiNikethan.EmployeeManagement.Modules.Admin.Data
 @inject NavigationManager Nav
+@inject ModuleRegistry ModuleRegistry
 @inject ICurrentUser CurrentUser
 @inject IUserAccountService UserAccountService
 @inject IAuditService AuditService
+@inject ISignInContextService SignInContextService
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IJSRuntime JS
 @inject ILogger<MainLayout> Logger
+@inject IConfiguration Config
 
 <div class="app-shell @(_sidebarOpen ? "" : "nav-collapsed")">
     <TopBar />
@@ -28,44 +33,81 @@
     private bool _sidebarOpen = true;
     private bool _isMobile;
     private DotNetObjectReference<MainLayout>? _dotNetRef;
+    private SignInContext? _capturedSignInContext;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Nav.LocationChanged += OnLocationChanged;
+
+        // Captured here, not in OnAfterRenderAsync where the actual sign-in
+        // logging happens - HttpContextAccessor.HttpContext is only
+        // reliably populated during the original request this component
+        // was first created for, which is OnInitializedAsync's territory.
+        // By the time OnAfterRenderAsync fires later in the circuit's
+        // life, it can already be null, which SignInContextService handles
+        // gracefully (returns an empty result rather than throwing) - but
+        // "gracefully empty" is exactly what was showing up as blank IP,
+        // device, browser, and Request ID on every single Entra sign-in.
+        // Captured once here and just read later, not re-captured.
+        if (CurrentUser.IsAuthenticated && !CurrentUser.IsLocalAuth)
+        {
+            _capturedSignInContext = await SignInContextService.CaptureAsync(HttpContextAccessor.HttpContext);
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
-        {
-            // Progressive enhancement - must never be able to crash the
-            // circuit if it fails (e.g. a stale cached site.js missing a
-            // function, as happened once already).
-            try
-            {
-                _isMobile = await JS.InvokeAsync<bool>("siteHelpers.isMobileWidth");
-                if (_isMobile && _sidebarOpen)
-                {
-                    // site.js already fixed the visible DOM synchronously
-                    // before this ran - this just brings the C# state back
-                    // in sync so future Blazor-driven re-renders don't
-                    // revert it. No visible change happens here.
-                    _sidebarOpen = false;
-                    StateHasChanged();
-                }
+        if (!firstRender) return;
 
-                _dotNetRef = DotNetObjectReference.Create(this);
-                await JS.InvokeVoidAsync("siteHelpers.registerBreakpointListener", _dotNetRef);
-            }
-            catch (JSException ex)
+        // Account resolution and sign-in logging live here now, not in
+        // OnInitializedAsync. This isn't just a workaround for the duplicate
+        // audit log entries - OnAfterRenderAsync(firstRender) is structurally
+        // guaranteed to fire exactly once, for the real interactive circuit
+        // only. Blazor's prerendering pass produces static HTML and is then
+        // discarded; it never calls OnAfterRender/OnAfterRenderAsync at all -
+        // that's true since Blazor Server's earliest versions, not a new API
+        // this app happens to depend on. OnInitializedAsync, by contrast,
+        // genuinely runs during BOTH the prerender pass and the real circuit,
+        // which is what was producing a second, spurious "SignIn" audit
+        // entry (with ActorDisplayName falling back to "unknown", since
+        // claims resolution during the prerender pass wasn't reliable) on
+        // every single login - not a real account, just a byproduct of that
+        // duplicate execution.
+        //
+        // One real, visible tradeoff from this move: the sidebar/nav can
+        // very briefly render before permissions are known (a fraction of a
+        // second, since this is now a DB round-trip happening after first
+        // paint rather than before it) - StateHasChanged() below corrects it
+        // as soon as resolution completes. Worth knowing about, not hidden.
+        await ResolveAccountAndLogSignInAsync();
+
+        // Progressive enhancement - must never be able to crash the
+        // circuit if it fails (e.g. a stale cached site.js missing a
+        // function, as happened once already).
+        try
+        {
+            _isMobile = await JS.InvokeAsync<bool>("siteHelpers.isMobileWidth");
+            if (_isMobile && _sidebarOpen)
             {
-                Logger.LogWarning(ex, "Viewport-aware sidebar setup failed — likely a stale cached site.js. App continues with the desktop-default sidebar state.");
+                // site.js already fixed the visible DOM synchronously
+                // before this ran - this just brings the C# state back
+                // in sync so future Blazor-driven re-renders don't
+                // revert it. No visible change happens here.
+                _sidebarOpen = false;
+                StateHasChanged();
             }
-            catch (JSDisconnectedException)
-            {
-                // Circuit disconnected mid-setup (e.g. user navigated away
-                // instantly) - nothing to do, not an error worth logging.
-            }
+
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("siteHelpers.registerBreakpointListener", _dotNetRef);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Viewport-aware sidebar setup failed — likely a stale cached site.js. App continues with the desktop-default sidebar state.");
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit disconnected mid-setup (e.g. user navigated away
+            // instantly) - nothing to do, not an error worth logging.
         }
     }
 
@@ -84,7 +126,7 @@
         StateHasChanged();
     }
 
-    protected override async Task OnInitializedAsync()
+    private async Task ResolveAccountAndLogSignInAsync()
     {
         if (!CurrentUser.IsAuthenticated || CurrentUser.UserAccountId.HasValue) return;
 
@@ -123,32 +165,86 @@
             }
         }
 
-        if (account != null)
+        if (account == null)
         {
-            var expired = account.RoleGroupExpiresAtUtc.HasValue && account.RoleGroupExpiresAtUtc.Value < DateTime.UtcNow;
-            var permissions = expired
-                ? new List<string>()
-                : await UserAccountService.GetEffectivePermissionsAsync(account.RoleGroupId);
-            var roleGroups = await UserAccountService.ListRoleGroupsAsync();
-            var roleGroupName = roleGroups.FirstOrDefault(g => g.Id == account.RoleGroupId)?.Name ?? "";
-            CurrentUser.SetAccountContext(account.Id, account.StaffId, roleGroupName, permissions);
-
-            // Fires exactly once per new circuit, thanks to the UserAccountId
-            // guard at the top of this method - a page refresh from an
-            // already-authenticated session establishes a new circuit too,
-            // so this is closer to "session established" than a strict
-            // interactive re-login every time, which is what the context
-            // string below says plainly rather than overclaiming otherwise.
-            // The local-auth sign-in itself is already logged separately in
-            // LocalAccountController, at the moment the credentials are
-            // actually verified - this covers the Entra ID path, which has
-            // no equivalent single call site of its own to hook into.
-            if (!CurrentUser.IsLocalAuth)
-            {
-                await AuditService.LogAsync("Auth", "Session", account.Id.ToString(), "SignIn",
-                    context: "Entra ID session established");
-            }
+            // No matching UserAccount, not the bootstrap admin - this
+            // person authenticated with Entra successfully but was never
+            // onboarded through Add Staff or Access Management. Previously
+            // this was caught earlier, before Blazor even ran, by the
+            // static AllowedUserObjectIds allowlist - removed because it
+            // required manually editing this exact config file for every
+            // new hire. This is the dynamic replacement: same outcome
+            // (blocked, with a clear reason), but automatic - anyone with
+            // a real UserAccount record gets in, nobody else does, no
+            // config file involved at all.
+            //
+            // forceLoad: true because /access-denied is a plain MVC
+            // controller route, not a Blazor page - a normal client-side
+            // NavigateTo wouldn't actually reach it from inside a live
+            // circuit.
+            Nav.NavigateTo("/access-denied", forceLoad: true);
+            return;
         }
+
+        // Was previously only ever updated inside VerifyLocalLoginAsync -
+        // meaning Entra-authenticated accounts (including this bootstrap
+        // admin account) never had LastLoginAtUtc touched at all, regardless
+        // of how many times they'd actually signed in. Fixed here, in the
+        // one place both auth paths already converge.
+        await UserAccountService.UpdateLastLoginAsync(account.Id);
+
+        var expired = account.RoleGroupExpiresAtUtc.HasValue && account.RoleGroupExpiresAtUtc.Value < DateTime.UtcNow;
+        var permissions = (expired || !account.IsActive)
+            ? new List<string>()
+            : await UserAccountService.GetEffectivePermissionsAsync(account.RoleGroupId);
+        var roleGroups = await UserAccountService.ListRoleGroupsAsync();
+        var roleGroupName = roleGroups.FirstOrDefault(g => g.Id == account.RoleGroupId)?.Name ?? "";
+        CurrentUser.SetAccountContext(account.Id, account.StaffId, roleGroupName, permissions);
+        EnforceRouteAuthorization();
+
+        // Corrects the client-side idle timer's defaults (15 min, Entra
+        // sign-out) to the real, configured values - specifically fixes
+        // local-login users being sent to a sign-out URL that has nothing
+        // to do with their session.
+        var idleTimeoutMinutes = Config.GetValue("Authentication:IdleTimeoutMinutes", 30);
+        try
+        {
+            await JS.InvokeVoidAsync("siteHelpers.configureIdleLogout", CurrentUser.IsLocalAuth, idleTimeoutMinutes);
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException)
+        {
+            // The circuit disconnected between the render starting and
+            // this call running - e.g. the browser tab was closed or
+            // navigated away quickly. Nothing meaningful to do if the
+            // client is already gone; this specifically isn't a real
+            // error worth surfacing as an unhandled circuit exception.
+        }
+
+        // The local-auth sign-in itself is already logged separately in
+        // LocalAccountController, at the moment the credentials are
+        // actually verified - this covers the Entra ID path, which has no
+        // equivalent single call site of its own to hook into. Guaranteed
+        // to run exactly once now, since this whole method only ever runs
+        // from OnAfterRenderAsync(firstRender) - no dedup check needed.
+        //
+        // No roleGroupAtTimeOverride needed here (unlike the local sign-in
+        // path) - SetAccountContext just above already populated
+        // CurrentUser.RoleGroupName, so LogAsync's default (read from
+        // ICurrentUser) is already correct at this point.
+        if (!CurrentUser.IsLocalAuth)
+        {
+            var signInCtx = _capturedSignInContext ?? new SignInContext();
+            await AuditService.LogAsync("Auth", "Session", account.Id.ToString(), "SignIn",
+                context: "Entra ID session established", provider: "Entra ID", isSuccess: true,
+                requestId: signInCtx.RequestId, ipAddress: signInCtx.IpAddress, geoLocation: signInCtx.GeoLocation,
+                deviceInfo: signInCtx.DeviceInfo, browserInfo: signInCtx.BrowserInfo);
+        }
+
+        // Nothing above updates the UI on its own from within OnAfterRenderAsync
+        // context automatically - explicit StateHasChanged() is what actually
+        // reflects the newly-resolved permissions (nav items, role-gated
+        // content) once account resolution completes.
+        StateHasChanged();
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
@@ -160,8 +256,42 @@
             // permanent state.
             if (_isMobile && _sidebarOpen)
                 _sidebarOpen = false;
+            EnforceRouteAuthorization();
             StateHasChanged();
         });
+
+    /// <summary>
+    /// The actual enforcement behind module access - previously, the nav
+    /// bar hiding a link was the ONLY thing standing between someone and a
+    /// module they didn't have permission for; typing the URL directly
+    /// bypassed it completely, confirmed directly (Payroll blocked, but
+    /// only because it happened to have its own separate check - other
+    /// modules had none at all). This runs on every page load and every
+    /// subsequent navigation, checking the same ModuleAccessMap the nav
+    /// bar already uses, so a module added later is automatically
+    /// protected without anyone needing to remember to add a check to
+    /// that specific page.
+    /// </summary>
+    private void EnforceRouteAuthorization()
+    {
+        if (!CurrentUser.IsAuthenticated || !CurrentUser.UserAccountId.HasValue) return;
+
+        var currentPath = Nav.ToBaseRelativePath(Nav.Uri).TrimEnd('/');
+        var matchingModule = ModuleRegistry.EnabledModules
+            .FirstOrDefault(m => currentPath.StartsWith(m.BasePath.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
+
+        // Route doesn't belong to any known module (e.g. a non-module page) -
+        // nothing to enforce here. Also never blocks Dashboard itself -
+        // it's the safe fallback destination below, and blocking it would
+        // risk a redirect loop for an account with genuinely zero
+        // permissions rather than showing them a sensible landing page.
+        if (matchingModule == null || matchingModule.Name == "Dashboard") return;
+
+        if (!ModuleAccessMap.CanView(matchingModule.Name, CurrentUser.HasPermission))
+        {
+            Nav.NavigateTo("/dashboard");
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {

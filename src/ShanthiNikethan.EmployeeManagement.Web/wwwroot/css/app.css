@@ -953,3 +953,8 @@ html[data-theme="dark"] .dash-icon-purple { background: rgba(122, 79, 201, 0.22)
 .attendance-register thead th {
     background: var(--bg-surface-alt) !important;
 }
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}

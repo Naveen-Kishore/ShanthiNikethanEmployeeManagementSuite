@@ -22,6 +22,8 @@ public class AppDbContext : DbContext
 
     public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
     public DbSet<ModuleStateRecord> ModuleState => Set<ModuleStateRecord>();
+    public DbSet<DashboardNotification> DashboardNotifications => Set<DashboardNotification>();
+    public DbSet<DashboardNotificationDismissal> DashboardNotificationDismissals => Set<DashboardNotificationDismissal>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -39,6 +41,19 @@ public class AppDbContext : DbContext
             e.ToTable("ModuleState");
             e.HasKey(x => x.ModuleName);
             e.Property(x => x.LicenseTier).HasConversion<string>();
+        });
+
+        modelBuilder.Entity<DashboardNotification>(e =>
+        {
+            e.ToTable("DashboardNotification");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.TargetRoleGroupName, x.CreatedAtUtc }).IsDescending(false, true);
+        });
+
+        modelBuilder.Entity<DashboardNotificationDismissal>(e =>
+        {
+            e.ToTable("DashboardNotificationDismissal");
+            e.HasKey(x => new { x.NotificationId, x.UserAccountId });
         });
 
         // Delegate to each enabled module to add its own entities

@@ -98,26 +98,40 @@ window.siteHelpers = {
         }
     },
 
-    /// Starts a 15-minute inactivity timer that signs the user out
-    /// automatically. Runs as plain JS (not Blazor interop) so it keeps
+    /// Starts an inactivity timer that signs the user out automatically -
+    /// defaults to 15 minutes and the Entra sign-out path until
+    /// configureIdleLogout() below corrects both, shortly after Blazor
+    /// connects and MainLayout knows the real values (the configured
+    /// server-side idle timeout, and whether this is a local-login
+    /// session rather than Entra, which needs a different sign-out URL
+    /// entirely). Runs as plain JS (not Blazor interop) so it keeps
     /// working even if the SignalR circuit drops. Any mouse, keyboard,
     /// scroll, or touch activity resets the timer.
+    _idleLimitMs: 15 * 60 * 1000,
+    _idleSignOutUrl: '/MicrosoftIdentity/Account/SignOut',
+    _idleTimerId: null,
+
+    configureIdleLogout: function (isLocalAuth, idleTimeoutMinutes) {
+        window.siteHelpers._idleLimitMs = idleTimeoutMinutes * 60 * 1000;
+        window.siteHelpers._idleSignOutUrl = isLocalAuth ? '/signin/logout' : '/MicrosoftIdentity/Account/SignOut';
+        // Restart with the corrected values immediately, rather than
+        // waiting for the next activity event to pick them up.
+        window.siteHelpers._resetIdleTimer();
+    },
+
+    _resetIdleTimer: function () {
+        if (window.siteHelpers._idleTimerId) clearTimeout(window.siteHelpers._idleTimerId);
+        window.siteHelpers._idleTimerId = setTimeout(function () {
+            window.location.href = window.siteHelpers._idleSignOutUrl;
+        }, window.siteHelpers._idleLimitMs);
+    },
+
     startIdleLogoutTimer: function () {
-        var IDLE_LIMIT_MS = 15 * 60 * 1000;
-        var timerId = null;
-
-        function resetTimer() {
-            if (timerId) clearTimeout(timerId);
-            timerId = setTimeout(function () {
-                window.location.href = '/MicrosoftIdentity/Account/SignOut';
-            }, IDLE_LIMIT_MS);
-        }
-
         ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'].forEach(function (evt) {
-            document.addEventListener(evt, resetTimer, { passive: true });
+            document.addEventListener(evt, window.siteHelpers._resetIdleTimer, { passive: true });
         });
 
-        resetTimer();
+        window.siteHelpers._resetIdleTimer();
     },
 
     _charts: {},

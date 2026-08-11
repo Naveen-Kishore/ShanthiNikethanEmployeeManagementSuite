@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.UI;
@@ -11,6 +12,7 @@ using ShanthiNikethan.EmployeeManagement.Core.Data;
 using ShanthiNikethan.EmployeeManagement.Core.Modules;
 using ShanthiNikethan.EmployeeManagement.Core.Services;
 using ShanthiNikethan.EmployeeManagement.Modules.Admin.Data;
+using ShanthiNikethan.EmployeeManagement.Modules.AutomationRules.Services;
 using ShanthiNikethan.EmployeeManagement.Shared.Components;
 
 // QuestPDF community licence (free for revenue < ₹8 Cr)
@@ -37,6 +39,23 @@ if (!string.IsNullOrWhiteSpace(keyVaultUri))
     builder.Configuration.AddAzureKeyVault(
         new Uri(keyVaultUri),
         new DefaultAzureCredential());
+
+    // DEV-only bridge: the production ClientSecret already occupies the
+    // name "AzureAd--ClientSecret" in this vault (Key Vault secret names
+    // must be unique within a vault), so a dev-tenant secret being tested
+    // here needs a different name - "AzureAd-Dev--ClientSecret", which
+    // Key Vault's double-dash convention maps to the config key
+    // "AzureAd-Dev:ClientSecret", not the standard "AzureAd:ClientSecret"
+    // every other part of the app (including the new Graph client
+    // registration) actually reads from. This copies it across, but only
+    // outside Production - PROD's own secret is never touched or
+    // shadowed by this.
+    if (!builder.Environment.IsProduction())
+    {
+        var devSecret = builder.Configuration["AzureAd-Dev:ClientSecret"];
+        if (!string.IsNullOrWhiteSpace(devSecret))
+            builder.Configuration["AzureAd:ClientSecret"] = devSecret;
+    }
 }
 
 // ==================================================================
@@ -70,6 +89,15 @@ builder.Services.AddSingleton(moduleRegistry);
 // ==================================================================
 const string LocalAuthCookieName = "SNM.LocalAuth";
 
+// Configurable so this can be adjusted without a code change - defaults
+// to 30 minutes, a common baseline for business apps handling sensitive
+// data (salary information, staff records) without being so aggressive
+// it disrupts a normal workday. SlidingExpiration=true on both schemes
+// below means this is a genuine idle timeout, not a flat session length -
+// active use keeps renewing it, inactivity lets it expire.
+var idleTimeoutMinutes = builder.Configuration.GetValue("Authentication:IdleTimeoutMinutes", 30);
+var idleTimeout = TimeSpan.FromMinutes(idleTimeoutMinutes);
+
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"))
     .Services.AddAuthentication()
@@ -78,7 +106,8 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
         options.LoginPath = "/signin";
         options.AccessDeniedPath = "/access-denied";
         options.Cookie.Name = LocalAuthCookieName;
-        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.ExpireTimeSpan = idleTimeout;
+        options.SlidingExpiration = true;
     })
     .AddPolicyScheme("SmartAuth", "Local or Entra ID", options =>
     {
@@ -105,6 +134,12 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
 builder.Services.PostConfigure<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme, options =>
 {
     options.AccessDeniedPath = "/access-denied";
+    // Same idle-timeout reasoning as the LocalAuth scheme above - this is
+    // the app's OWN cookie, entirely separate from whatever Entra's own
+    // SSO session is doing upstream, and fully within the app's control
+    // regardless of Entra ID licensing tier.
+    options.ExpireTimeSpan = idleTimeout;
+    options.SlidingExpiration = true;
 });
 
 // PostConfigure runs after AddMicrosoftIdentityWebApp's own internal scheme
@@ -120,24 +155,17 @@ builder.Services.PostConfigure<AuthenticationOptions>(options =>
 
 builder.Services.AddAuthorization(options =>
 {
-    var allowedOids = builder.Configuration
-        .GetSection("Authorization:AllowedUserObjectIds").Get<string[]>() ?? Array.Empty<string>();
-
+    // No longer checks a static Object ID list here. That list required
+    // manually editing this exact config file for every single new staff
+    // member added through Add Staff - directly fighting the onboarding
+    // flow this whole project built around automatic, database-driven
+    // provisioning. The real authorization check now lives where it
+    // belongs: whether a matching UserAccount record exists at all,
+    // enforced dynamically in MainLayout (see ResolveAccountAndLogSignInAsync) -
+    // which redirects to /access-denied for anyone genuinely unmatched,
+    // with zero config file to maintain as staff are added or removed.
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
-        .RequireAssertion(ctx =>
-        {
-            // Local-auth users are already tightly controlled — only the
-            // two hand-created accounts exist, no self-service signup —
-            // so authenticating via this scheme at all is sufficient.
-            if (ctx.User.Identity?.AuthenticationType == "LocalAuth") return true;
-
-            // Entra ID users: exact same allowlist check as always, unchanged.
-            if (allowedOids.Length == 0) return true;
-            var oid = ctx.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                   ?? ctx.User.FindFirst("oid")?.Value;
-            return oid != null && allowedOids.Contains(oid, StringComparer.OrdinalIgnoreCase);
-        })
         .Build();
 });
 
@@ -153,6 +181,9 @@ builder.Services.AddDbContextFactory<AppDbContext>(opt =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<IDashboardNotificationService, DashboardNotificationService>();
+builder.Services.AddScoped<ISignInContextService, SignInContextService>();
+builder.Services.AddScoped<IGraphProvisioningService, GraphProvisioningService>();
 
 // ==================================================================
 // Module services — each enabled module registers what it needs
@@ -169,9 +200,55 @@ builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddControllersWithViews().AddMicrosoftIdentityUI();
 
 // ==================================================================
+// Rate limiting - a second, independent layer of brute-force protection
+// alongside the per-account lockout in UserAccountService.VerifyLocalLoginAsync.
+// This one caps attempts per IP address, regardless of which username is
+// being tried, which the account-level lockout alone can't do (someone
+// spreading guesses across many different usernames would never trip any
+// single account's threshold). Deliberately generous rather than strict -
+// this is a small school's break-glass fallback login, not a public
+// service, so the goal is slowing down automated guessing, not
+// inconveniencing a real admin who mistypes a password twice.
+// ==================================================================
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("LocalLoginPolicy", opt =>
+    {
+        // Configurable specifically so the E2E test environment can raise
+        // this via an environment variable override (Authentication__LocalLoginRateLimitPermits),
+        // the same pattern already used for the E2E database connection
+        // string - without touching this default at all, which is what
+        // every real environment (dev, and eventually production) keeps
+        // using. A growing library of E2E tests signing in for real,
+        // repeatedly, in a short window is exactly the kind of traffic
+        // this limiter is designed to slow down - correctly, for a real
+        // user, but it has no actual attacker to catch in an isolated
+        // test run against a throwaway database.
+        opt.PermitLimit = builder.Configuration.GetValue("Authentication:LocalLoginRateLimitPermits", 10);
+        opt.Window = TimeSpan.FromMinutes(5);
+        opt.QueueLimit = 0; // reject immediately once the limit is hit, rather than queuing and delaying
+    });
+});
+
+// ==================================================================
 // General-purpose HttpClient (available for any future outbound calls)
 // ==================================================================
 builder.Services.AddHttpClient();
+
+// ==================================================================
+// Microsoft Graph credentials — TenantId/ClientId/ClientSecret already
+// configured for sign-in are reused here (same app registration, now
+// also holding the User.ReadWrite.All and GroupMember.ReadWrite.All
+// Application permissions granted via admin consent). Deliberately NOT
+// constructing the actual GraphServiceClient here as a DI singleton -
+// that constructor throws on a missing/invalid secret, and doing that
+// eagerly during DI resolution took down the entire Blazor circuit the
+// moment anything merely navigated to a page that injects
+// IGraphProvisioningService, rather than showing a clean error on that
+// one page. GraphProvisioningService builds the client itself, lazily,
+// wrapped in error handling - see that file for why.
+// ==================================================================
 
 // ==================================================================
 // Reverse-proxy awareness (IIS in front of Kestrel)
@@ -187,6 +264,41 @@ var app = builder.Build();
 
 app.UseForwardedHeaders();
 
+// ==================================================================
+// Security response headers - applied to every response, before
+// anything else in the pipeline runs. CSP specifically checked against
+// this app's real structure rather than a generic template: script-src
+// 'self' works without 'unsafe-inline' because every <script> tag here
+// is external (App.razor, and the sign-in page after moving its inline
+// onclick/onload handlers into signin.js) - style-src still needs
+// 'unsafe-inline' given how extensively inline style="..." attributes
+// are used throughout the Razor components; removing that would mean
+// rewriting a very large number of components into CSS classes, a
+// separate, much larger undertaking. connect-src allows wss:/ws:
+// specifically for Blazor Server's SignalR circuit - without it, the
+// entire app would fail to render at all, not just look different.
+// ==================================================================
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
+    headers["Content-Security-Policy"] =
+        "default-src 'self'; " +
+        "script-src 'self'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; " +
+        "font-src 'self'; " +
+        "connect-src 'self' wss: ws:; " +
+        "frame-ancestors 'none'; " +
+        "object-src 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self';";
+    await next();
+});
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/error", createScopeForErrors: true);
@@ -201,6 +313,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseAntiforgery();
+app.UseRateLimiter();
 
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.MapControllers();
@@ -263,7 +376,14 @@ catch (Exception ex)
 // config permanently; it's inert after the first successful run.
 // ==================================================================
 var bootstrapAdminObjectId = builder.Configuration["Authorization:BootstrapGlobalAdminObjectId"];
-if (!string.IsNullOrWhiteSpace(bootstrapAdminObjectId))
+// Guid.TryParse, not just a non-empty check - a leftover placeholder value
+// (e.g. "PASTE_YOUR_PRODUCTION_TENANT_OBJECT_ID_HERE") is non-empty text
+// too, and was previously being silently accepted as if it were a real
+// Object ID - creating a "Bootstrap Administrator" account nobody could
+// ever actually sign into, since no real Entra token has that literal
+// string as its oid claim. Guid.TryParse means only a value that's
+// actually shaped like an Object ID gets treated as one.
+if (!string.IsNullOrWhiteSpace(bootstrapAdminObjectId) && Guid.TryParse(bootstrapAdminObjectId, out _))
 {
     try
     {

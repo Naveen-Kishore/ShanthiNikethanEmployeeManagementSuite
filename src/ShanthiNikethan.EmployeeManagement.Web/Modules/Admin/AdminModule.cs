@@ -18,6 +18,8 @@ public class AdminModule : IModule
     public void RegisterServices(IServiceCollection services)
     {
         services.AddScoped<IUserAccountService, UserAccountService>();
+        services.AddScoped<IOffboardingService, OffboardingService>();
+        services.AddScoped<IOnboardingService, OnboardingService>();
     }
 
     public void ConfigureDbContext(ModelBuilder modelBuilder)
@@ -52,6 +54,8 @@ public class AdminModule : IModule
             e.Property(x => x.DisplayName).HasMaxLength(200);
             e.Property(x => x.EntraObjectId).HasMaxLength(100);
             e.Property(x => x.EntraUpn).HasMaxLength(200);
+            e.Property(x => x.ArchivedEntraObjectId).HasMaxLength(100);
+            e.Property(x => x.ArchivedEntraUpn).HasMaxLength(200);
             e.Property(x => x.LocalUsername).HasMaxLength(100);
             e.Property(x => x.LocalPasswordHash).HasMaxLength(500);
             e.HasIndex(x => x.EntraObjectId);

@@ -1,0 +1,176 @@
+@page "/automation-rules/graph-test"
+@using ShanthiNikethan.EmployeeManagement.Modules.AutomationRules.Services
+@inject IGraphProvisioningService GraphService
+@inject ICurrentUser CurrentUser
+@inject IConfiguration Config
+
+<h1>Graph Diagnostics</h1>
+
+@if (!CurrentUser.HasPermission("Admin.ManageAutomationRules"))
+{
+    <p class="stat-sub">You don't have permission to view this page.</p>
+}
+else
+{
+    <div class="alert warning" style="margin-bottom: 18px;">
+        This is a diagnostic tool, not a permanent feature — it exists to prove the Graph integration
+        actually works against your real tenant before Stage 3 wires it into Add Staff. Everything here
+        creates a clearly-marked, obviously-fake test account — never anything that could be mistaken
+        for a real staff member.
+    </div>
+
+    <div class="card" style="padding: 18px 20px; margin-bottom: 18px;">
+        <h2 style="margin-top: 0;">1. Create a test user</h2>
+        <p class="stat-sub">Creates "TEST — DO NOT USE" with a randomly generated UPN under your domain.</p>
+        <button class="primary" @onclick="CreateTestUserAsync" disabled="@_creating">@(_creating ? "Creating…" : "Create test user")</button>
+
+        @if (_createResult != null)
+        {
+            <div class="calc-panel" style="margin-top: 14px;">
+                @if (_createResult.Success)
+                {
+                    <div class="form-row"><label>Object ID</label><div style="font-family: ui-monospace, monospace;">@_createResult.ObjectId</div></div>
+                    <div class="form-row"><label>Temporary password</label><div style="font-family: ui-monospace, monospace;">@_createResult.TemporaryPassword</div></div>
+                    <p class="stat-sub">Copy the Object ID below to test disable/delete/restore against this exact account.</p>
+                }
+                else
+                {
+                    <div class="alert danger">@_createResult.ErrorMessage</div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="card" style="padding: 18px 20px; margin-bottom: 18px;">
+        <h2 style="margin-top: 0;">2. Test lifecycle operations</h2>
+        <div class="form-row">
+            <label>Object ID to operate on</label>
+            <input type="text" @bind="_targetObjectId" placeholder="Paste from step 1, or any test account you already have" style="font-family: ui-monospace, monospace;" />
+        </div>
+        <div class="toolbar">
+            <button class="secondary" @onclick="() => RunOperationAsync(() => GraphService.DisableUserAsync(_targetObjectId))" disabled="@_operating">Disable</button>
+            <button class="secondary" @onclick="() => RunOperationAsync(() => GraphService.EnableUserAsync(_targetObjectId))" disabled="@_operating">Enable</button>
+            <button class="danger" @onclick="() => RunOperationAsync(() => GraphService.DeleteUserAsync(_targetObjectId))" disabled="@_operating">Delete (soft-delete)</button>
+            <button class="secondary" @onclick="() => RunOperationAsync(() => GraphService.RestoreUserAsync(_targetObjectId))" disabled="@_operating">Restore</button>
+        </div>
+        @if (_operationResult != null)
+        {
+            <div class="alert @(_operationResult.Success ? "success" : "danger")" style="margin-top: 12px;">
+                @(_operationResult.Success ? "Succeeded." : _operationResult.ErrorMessage)
+            </div>
+        }
+
+        <div class="form-row" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;">
+            <label>UPN to check against Entra's deleted-items list</label>
+            <input type="text" @bind="_upnCheckValue" placeholder="Paste the UPN of the test account you just deleted above" style="font-family: ui-monospace, monospace;" />
+            <p class="stat-sub" style="margin-top: 4px;">
+                This is the least-tested part of the whole Graph integration — a genuine real-world test here is:
+                create a test user above, note its UPN, delete it, then check that exact UPN and confirm this
+                correctly reports "recently deleted." Then check a UPN you know was never used and confirm it
+                reports the opposite.
+            </p>
+        </div>
+        <div class="toolbar">
+            <button class="secondary" @onclick="CheckUpnDeletedAsync" disabled="@_operating">Check UPN</button>
+        </div>
+        @if (_upnCheckResult.HasValue)
+        {
+            <div class="alert @(_upnCheckResult.Value ? "warning" : "success")" style="margin-top: 12px;">
+                @(_upnCheckResult.Value
+                    ? "Recently deleted — this UPN is currently reserved by a soft-deleted Entra object."
+                    : "Not found in deleted items — either never used, already past the 30-day window, or genuinely available.")
+            </div>
+        }
+    </div>
+
+    <div class="card" style="padding: 18px 20px; margin-bottom: 18px;">
+        <h2 style="margin-top: 0;">3. Test group operations</h2>
+        <p class="stat-sub">Use a real test group's Object ID here, not a production license/Teams group, until you're confident this works.</p>
+        <div class="form-grid">
+            <div class="form-row">
+                <label>User Object ID</label>
+                <input type="text" @bind="_groupTestUserObjectId" style="font-family: ui-monospace, monospace;" />
+            </div>
+            <div class="form-row">
+                <label>Group Object ID</label>
+                <input type="text" @bind="_groupTestGroupObjectId" style="font-family: ui-monospace, monospace;" />
+            </div>
+        </div>
+        <div class="toolbar">
+            <button class="secondary" @onclick="VerifyGroupAsync" disabled="@_operating">Verify group exists</button>
+            <button class="secondary" @onclick="() => RunOperationAsync(() => GraphService.AddToGroupAsync(_groupTestUserObjectId, _groupTestGroupObjectId))" disabled="@_operating">Add to group</button>
+            <button class="secondary" @onclick="() => RunOperationAsync(() => GraphService.RemoveFromGroupAsync(_groupTestUserObjectId, _groupTestGroupObjectId))" disabled="@_operating">Remove from group</button>
+        </div>
+        @if (_verifyResult != null)
+        {
+            <div class="alert @(_verifyResult.Value.Found ? "success" : "danger")" style="margin-top: 12px;">
+                @(_verifyResult.Value.Found ? $"Found: {_verifyResult.Value.DisplayName}" : "Group not found — check the Object ID and that admin consent was actually granted.")
+            </div>
+        }
+        @if (_operationResult != null)
+        {
+            <div class="alert @(_operationResult.Success ? "success" : "danger")" style="margin-top: 12px;">
+                @(_operationResult.Success ? "Succeeded." : _operationResult.ErrorMessage)
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _creating;
+    private bool _operating;
+    private CreateUserResult? _createResult;
+    private GraphOperationResult? _operationResult;
+    private (bool Found, string? DisplayName)? _verifyResult;
+    private string _upnCheckValue = "";
+    private bool? _upnCheckResult;
+
+    private string _targetObjectId = "";
+    private string _groupTestUserObjectId = "";
+    private string _groupTestGroupObjectId = "";
+
+    private async Task CreateTestUserAsync()
+    {
+        _creating = true;
+        _createResult = null;
+        var suffix = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+        // Was hardcoded to @shanthinikethan.in (production's domain) -
+        // meant this page could only ever work against the production
+        // tenant, failing with "domain not verified" against any other
+        // tenant, exactly what happened testing against the dev tenant.
+        // Reads whatever's actually configured instead, so this page
+        // correctly works against whichever tenant is currently active.
+        var domain = Config["AzureAd:Domain"];
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            _createResult = new CreateUserResult { Success = false, ErrorMessage = "AzureAd:Domain isn't set in configuration - can't build a test UPN without it." };
+            _creating = false;
+            return;
+        }
+        _createResult = await GraphService.CreateUserAsync("TEST — DO NOT USE", $"graph-test-{suffix}@{domain}");
+        if (_createResult.Success)
+            _targetObjectId = _createResult.ObjectId ?? "";
+        _creating = false;
+    }
+
+    private async Task RunOperationAsync(Func<Task<GraphOperationResult>> operation)
+    {
+        _operating = true;
+        _operationResult = await operation();
+        _operating = false;
+    }
+
+    private async Task VerifyGroupAsync()
+    {
+        _operating = true;
+        _verifyResult = await GraphService.VerifyGroupAsync(_groupTestGroupObjectId);
+        _operating = false;
+    }
+
+    private async Task CheckUpnDeletedAsync()
+    {
+        _operating = true;
+        _upnCheckResult = await GraphService.IsUpnRecentlyDeletedAsync(_upnCheckValue.Trim());
+        _operating = false;
+    }
+}

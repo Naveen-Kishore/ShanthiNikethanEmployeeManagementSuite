@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using ShanthiNikethan.EmployeeManagement.Core.Services;
 using ShanthiNikethan.EmployeeManagement.Modules.Admin.Services;
 
@@ -29,11 +31,20 @@ public class LocalAccountController : Controller
 {
     private readonly IUserAccountService _userAccountService;
     private readonly IAuditService _audit;
+    private readonly ISignInContextService _signInContext;
+    private readonly IAntiforgery _antiforgery;
 
-    public LocalAccountController(IUserAccountService userAccountService, IAuditService audit)
+    // Same cache-busting reasoning as App.razor's AssetVersion - a fresh
+    // value every app start, so an updated signin.js is never served
+    // from a browser's stale cache after a deploy.
+    private static readonly string AssetVersion = DateTime.UtcNow.Ticks.ToString();
+
+    public LocalAccountController(IUserAccountService userAccountService, IAuditService audit, ISignInContextService signInContext, IAntiforgery antiforgery)
     {
         _userAccountService = userAccountService;
         _audit = audit;
+        _signInContext = signInContext;
+        _antiforgery = antiforgery;
     }
 
     [HttpGet]
@@ -41,11 +52,22 @@ public class LocalAccountController : Controller
     {
         var safeReturnUrl = string.IsNullOrWhiteSpace(returnUrl) || !returnUrl.StartsWith('/') ? "/" : returnUrl;
         var encodedReturnUrl = HtmlEncoder.Default.Encode(safeReturnUrl);
-        var showFallbackForm = error == "1"; // a failed attempt should re-open the form it came from, not reset to the choice screen
+        var showFallbackForm = error == "1" || error == "2"; // a failed attempt should re-open the form it came from, not reset to the choice screen
 
-        var errorHtml = error == "1"
-            ? "<div class=\"local-login-error\">Incorrect username or password.</div>"
-            : "";
+        var errorHtml = error switch
+        {
+            "1" => "<div class=\"local-login-error\">Incorrect username or password.</div>",
+            "2" => "<div class=\"local-login-error\">Too many failed attempts. This account is temporarily locked — try again in about 15 minutes.</div>",
+            _ => ""
+        };
+
+        // Generated fresh on every load of this form, embedded as a hidden
+        // field below, and validated on submit via [ValidateAntiForgeryToken]
+        // on the POST action - standard ASP.NET Core CSRF protection. Done
+        // manually here (rather than @Html.AntiForgeryToken(), which needs
+        // a Razor view) since this form is hand-written HTML, not a view.
+        var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
+        var antiforgeryFieldHtml = $"<input type=\"hidden\" name=\"{HtmlEncoder.Default.Encode(tokens.FormFieldName)}\" value=\"{HtmlEncoder.Default.Encode(tokens.RequestToken ?? "")}\" />";
 
         var html = $$"""
         <!DOCTYPE html>
@@ -54,9 +76,16 @@ public class LocalAccountController : Controller
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1" />
             <title>Sign In — Shanthi Nikethan Employee Management</title>
+            <link rel="preload" as="image" href="/img/signin-background.jpg" />
             <style>
                 * { box-sizing: border-box; }
                 html, body { margin: 0; height: 100%; }
+                /* Reinforces the draggable="false" attribute on both <img>
+                   tags below - draggable="false" alone is well-supported,
+                   but pairing it with the CSS equivalent closes the gap in
+                   older/quirkier browser implementations rather than
+                   relying on just one mechanism. */
+                img { -webkit-user-drag: none; user-drag: none; }
                 body {
                     font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
                     position: relative; overflow: hidden; min-height: 100vh;
@@ -81,13 +110,20 @@ public class LocalAccountController : Controller
                        clearly, with the same left-to-right personality the old design had. ---- */
                 .signin-bg {
                     position: fixed; inset: 0; z-index: 0; overflow: hidden;
-                    background: #6933b6; /* fallback while the image loads */
+                    /* Was #6933b6 (the bright brand purple) - replaced with a dark, muted
+                       tone that actually resembles what's behind the vignette once the
+                       photo has loaded, so any brief gap before it arrives barely
+                       registers instead of flashing a mismatched bright color. */
+                    background: #15111c;
                 }
                 .signin-bg-photo {
                     position: absolute; inset: 0; width: 100%; height: 100%;
                     object-fit: cover; object-position: center 30%;
                     filter: saturate(1.1) contrast(1.05) brightness(0.72);
+                    opacity: 0;
+                    transition: opacity 350ms ease;
                 }
+                .signin-bg-photo.loaded { opacity: 1; }
                 .signin-bg-scrim {
                     position: absolute; inset: 0;
                     background: linear-gradient(115deg,
@@ -183,12 +219,12 @@ public class LocalAccountController : Controller
         </head>
         <body>
             <div class="signin-bg">
-                <img class="signin-bg-photo" src="/img/signin-background.jpg" alt="" oncontextmenu="return false;" />
+                <img class="signin-bg-photo" src="/img/signin-background.jpg" alt="" draggable="false" />
                 <div class="signin-bg-scrim"></div>
             </div>
             <div class="signin-split">
             <div class="signin-brand-col">
-                <img src="/img/logo-emblem-full-white.png" alt="Shanthi Nikethan Matric Higher Secondary School" oncontextmenu="return false;" />
+                <img src="/img/logo-emblem-full-white.png" alt="Shanthi Nikethan Matric Higher Secondary School" draggable="false" />
             </div>
             <div class="signin-actions-col">
                 <div class="signin-actions-inner">
@@ -200,7 +236,7 @@ public class LocalAccountController : Controller
                             <span class="ms-logo"><span></span><span></span><span></span><span></span></span>
                             Sign in with Microsoft
                         </a>
-                        <button type="button" class="signin-btn" onclick="document.getElementById('fallbackChoice').style.display='none'; document.getElementById('fallbackForm').style.display='block'; document.getElementById('fallbackUsername').focus();">
+                        <button type="button" class="signin-btn" id="showFallbackForm">
                             Sign in with fallback account
                         </button>
                     </div>
@@ -210,6 +246,7 @@ public class LocalAccountController : Controller
                         {{errorHtml}}
                         <form method="post" action="/signin">
                             <input type="hidden" name="returnUrl" value="{{encodedReturnUrl}}" />
+                            {{antiforgeryFieldHtml}}
                             <div class="form-row">
                                 <label>Username</label>
                                 <input type="text" id="fallbackUsername" name="username" autocomplete="username" required autofocus />
@@ -220,7 +257,7 @@ public class LocalAccountController : Controller
                             </div>
                             <button type="submit" class="signin-btn">Sign in</button>
                         </form>
-                        <button type="button" class="signin-back-link" onclick="document.getElementById('fallbackForm').style.display='none'; document.getElementById('fallbackChoice').style.display='block';">← Back</button>
+                        <button type="button" class="signin-back-link" id="backToChoice">← Back</button>
                     </div>
 
                     <div class="security-notice">
@@ -231,6 +268,7 @@ public class LocalAccountController : Controller
                 <div class="page-footer">© 2026 Shanthi Nikethan Educational Trust. All rights reserved.</div>
             </div>
             </div>
+        <script src="/js/signin.js?v={{AssetVersion}}"></script>
         </body>
         </html>
         """;
@@ -239,24 +277,42 @@ public class LocalAccountController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("LocalLoginPolicy")]
     public async Task<IActionResult> Login(string username, string password, string? returnUrl)
     {
-        var account = await _userAccountService.VerifyLocalLoginAsync(username, password);
-        if (account == null)
-        {
-            // Log the failed attempt against whatever username was typed -
-            // there's no real account to attribute it to, but the attempted
-            // username itself is exactly the useful signal for spotting
-            // repeated guessing against this fallback path.
-            await _audit.LogAsync("Auth", "Session", null, "SignInFailed",
-                context: $"Local sign-in failed for username \"{username}\"",
-                actorDisplayNameOverride: username, actorObjectIdOverride: "(local, unverified)");
+        var signInCtx = await _signInContext.CaptureAsync(HttpContext);
 
-            var redirectBack = "/signin?error=1";
+        var attempt = await _userAccountService.VerifyLocalLoginAsync(username, password);
+
+        if (attempt.Outcome != LocalLoginOutcome.Success)
+        {
+            var isLockedOut = attempt.Outcome == LocalLoginOutcome.LockedOut;
+
+            // Log the failed attempt against whatever username was typed -
+            // there's no real account to attribute it to for an invalid
+            // username, but the attempted username itself is exactly the
+            // useful signal for spotting repeated guessing against this
+            // fallback path. A lockout gets its own distinct reason so
+            // it's easy to tell apart from an ordinary wrong password
+            // when reviewing the Audit Log later.
+            await _audit.LogAsync("Auth", "Session", null, "SignInFailed",
+                context: isLockedOut
+                    ? $"Local sign-in blocked - account for username \"{username}\" is temporarily locked after repeated failed attempts"
+                    : $"Local sign-in failed for username \"{username}\"",
+                actorDisplayNameOverride: username, actorObjectIdOverride: "(local, unverified)",
+                roleGroupAtTimeOverride: null, provider: "Local Fallback", isSuccess: false,
+                signInError: isLockedOut ? "Account temporarily locked" : "Incorrect username or password",
+                requestId: signInCtx.RequestId, ipAddress: signInCtx.IpAddress, geoLocation: signInCtx.GeoLocation,
+                deviceInfo: signInCtx.DeviceInfo, browserInfo: signInCtx.BrowserInfo);
+
+            var redirectBack = isLockedOut ? "/signin?error=2" : "/signin?error=1";
             if (!string.IsNullOrWhiteSpace(returnUrl))
                 redirectBack += $"&returnUrl={Uri.EscapeDataString(returnUrl)}";
             return Redirect(redirectBack);
         }
+
+        var account = attempt.Account!;
 
         var claims = new List<Claim>
         {
@@ -268,9 +324,18 @@ public class LocalAccountController : Controller
 
         await HttpContext.SignInAsync("LocalAuth", principal, new AuthenticationProperties
         {
-            IsPersistent = false,
-            ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8)
+            // No explicit ExpiresUtc here - the scheme's own ExpireTimeSpan
+            // and SlidingExpiration (configured in Program.cs, driven by
+            // Authentication:IdleTimeoutMinutes) govern this consistently
+            // now, rather than starting every sign-in from a fixed 8-hour
+            // window that would have conflicted with the idle timeout.
+            IsPersistent = false
         });
+
+        // Role group isn't known via ICurrentUser yet at this point (that
+        // only gets populated once MainLayout runs, on the NEXT page load) -
+        // looked up directly from the account we already have in hand.
+        var roleGroup = await _userAccountService.GetRoleGroupByIdAsync(account.RoleGroupId);
 
         // Explicit actor override here too: SignInAsync above doesn't
         // retroactively update HttpContext.User for the rest of THIS
@@ -278,7 +343,10 @@ public class LocalAccountController : Controller
         // (anonymous) state if we relied on it instead.
         await _audit.LogAsync("Auth", "Session", account.Id.ToString(), "SignIn",
             context: "Local fallback account sign-in",
-            actorDisplayNameOverride: account.DisplayName, actorObjectIdOverride: $"local:{account.Id}");
+            actorDisplayNameOverride: account.DisplayName, actorObjectIdOverride: $"local:{account.Id}",
+            roleGroupAtTimeOverride: roleGroup?.Name, provider: "Local Fallback", isSuccess: true,
+            requestId: signInCtx.RequestId, ipAddress: signInCtx.IpAddress, geoLocation: signInCtx.GeoLocation,
+            deviceInfo: signInCtx.DeviceInfo, browserInfo: signInCtx.BrowserInfo);
 
         var target = string.IsNullOrWhiteSpace(returnUrl) || !returnUrl.StartsWith('/') ? "/" : returnUrl;
         return LocalRedirect(target);
@@ -287,7 +355,10 @@ public class LocalAccountController : Controller
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
-        await _audit.LogAsync("Auth", "Session", null, "SignOut", context: "Local fallback account sign-out");
+        var signInCtx = await _signInContext.CaptureAsync(HttpContext);
+        await _audit.LogAsync("Auth", "Session", null, "SignOut", context: "Local fallback account sign-out",
+            provider: "Local Fallback", requestId: signInCtx.RequestId, ipAddress: signInCtx.IpAddress,
+            geoLocation: signInCtx.GeoLocation, deviceInfo: signInCtx.DeviceInfo, browserInfo: signInCtx.BrowserInfo);
         await HttpContext.SignOutAsync("LocalAuth");
         return LocalRedirect("/signin");
     }

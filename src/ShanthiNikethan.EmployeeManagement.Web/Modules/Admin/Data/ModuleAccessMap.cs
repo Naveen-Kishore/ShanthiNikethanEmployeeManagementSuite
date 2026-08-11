@@ -19,6 +19,7 @@ public static class ModuleAccessMap
         ["Admin"] = new[] { "Admin.ManageUsers", "Admin.ManageRoleGroups" },
         ["IdentityProvider"] = new[] { "Admin.ManageUsers", "Admin.ManageRoleGroups" },
         ["AuditLog"] = new[] { "Admin.ViewAuditLog" },
+        ["AutomationRules"] = new[] { "Admin.ManageAutomationRules" },
     };
 
     /// <summary>True if the user has at least one of the module's required permissions. Fail-closed: a module not listed here at all is hidden, not shown - the safer default for a system built to protect financial data. Global Administrator already holds every permission in the catalog, so this never blocks that role; it only affects a module someone forgot to map after adding it.</summary>

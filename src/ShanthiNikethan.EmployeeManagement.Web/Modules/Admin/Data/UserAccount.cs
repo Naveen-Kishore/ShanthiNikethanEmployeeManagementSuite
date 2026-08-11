@@ -26,6 +26,27 @@ public class UserAccount
     public string? LocalPasswordHash { get; set; }
     public bool LocalLoginEnabled { get; set; }
 
+    // ---- Brute-force protection for local login ----
+    // Both reset to 0/null on any successful login. FailedLoginAttempts
+    // increments on each wrong-password attempt against this account;
+    // once it crosses the threshold, LockoutEndUtc is set and further
+    // attempts are rejected outright until that time passes, without
+    // even checking the password - see VerifyLocalLoginAsync.
+    public int FailedLoginAttempts { get; set; }
+    public DateTime? LockoutEndUtc { get; set; }
+
+    // ---- Archived Entra identity ----
+    // Populated only when a Global Admin converts a linked account to local
+    // login (EnableLocalLoginOverrideAsync) - preserves the values that get
+    // cleared from EntraObjectId/EntraUpn above, so reverting back to Entra
+    // later doesn't mean starting from scratch. The revert path (RevertToEntraAsync)
+    // still verifies the archived Object ID against Entra directly before restoring
+    // it, rather than trusting it blindly - the actual Entra account is never
+    // touched by the conversion itself, but it could still have been deleted or
+    // renamed independently in the meantime by someone working directly in Entra.
+    public string? ArchivedEntraObjectId { get; set; }
+    public string? ArchivedEntraUpn { get; set; }
+
     public Guid RoleGroupId { get; set; }
     /// <summary>Optional expiry for this account's current role group assignment. Once past, the account keeps existing (still shows in Members, still authenticates) but has zero effective permissions until an admin extends or reassigns it — a soft lockout, not a full deactivation.</summary>
     public DateTime? RoleGroupExpiresAtUtc { get; set; }

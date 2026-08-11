@@ -48,6 +48,9 @@ public class Staff
     /// </summary>
     [MaxLength(50)] public string? SubDesignation { get; set; }
 
+    /// <summary>Plain username seeding a person's sign-in identity - the basis for both a UPN prefix and a potential local account username, kept consistent between the two. Office Admin can view but never edit this once set; only Global Admin can change it.</summary>
+    [MaxLength(100)] public string? Username { get; set; }
+
     public DateOnly DateOfJoining { get; set; }
 
     // === Statutory IDs ===

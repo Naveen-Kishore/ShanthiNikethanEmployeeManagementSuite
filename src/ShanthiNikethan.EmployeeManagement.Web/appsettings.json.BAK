@@ -8,6 +8,28 @@
   },
   "AllowedHosts": "*",
 
+  "ConnectionStrings": {
+    "Default": "Server=.\\SQLEXPRESS;Database=ShanthiNikethanEmployeeManagement_DEV;Trusted_Connection=True;TrustServerCertificate=True;"
+  },
+
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "Domain": "reachnaveenhotmailco.onmicrosoft.com",
+    "TenantId": "9f0d3a55-70ab-415f-9668-05a1e53c9ddf",
+    "ClientId": "e1db9eb6-136e-438d-8c31-50b231b7b9e5",
+    "CallbackPath": "/signin-oidc",
+    "SignedOutCallbackPath": "/signout-callback-oidc"
+  },
+
+  "Authorization": {
+    "BootstrapGlobalAdminObjectId": "32264dc0-faa9-4614-917f-e11e7d3fd577",
+    "AllowedUserObjectIds": [
+      "32264dc0-faa9-4614-917f-e11e7d3fd577",
+      "f7173ce1-76fc-4045-81a8-0e8019a259e1",
+      "a44dee42-6bdd-45f5-af98-680f63bfd0e6"
+    ]
+  },
+
   "Institution": {
     "Name": "Shanthi Nikethan Matric Higher Secondary School",
     "ShortName": "Shanthi Nikethan",

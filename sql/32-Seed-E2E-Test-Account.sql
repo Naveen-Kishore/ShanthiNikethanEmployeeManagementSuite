@@ -1,4 +1,4 @@
--- =============================================================================
+﻿-- =============================================================================
 -- Creates the ONE local-login account every E2E test signs in as, plus a
 -- role group with full access (reasonable here specifically because this
 -- is an isolated, test-only database, never production or dev).
@@ -20,7 +20,7 @@ GO
 
 SET XACT_ABORT ON;
 
-DECLARE @PasswordHash NVARCHAR(500) = N'PASTE_YOUR_HASH_HERE';
+DECLARE @PasswordHash NVARCHAR(500) = N'AQAAAAIAAYagAAAAENRH95bKMMDwFyrAYCQohEt3+CKZTj7bHUNvoM4gnOTa0esPpWusmEwgwsAt5XYDWw==';
 
 IF LEN(@PasswordHash) < 60
 BEGIN

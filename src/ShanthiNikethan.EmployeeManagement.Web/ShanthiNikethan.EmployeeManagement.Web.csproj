@@ -7,7 +7,6 @@
     <AssemblyName>ShanthiNikethan.EmployeeManagement.Web</AssemblyName>
     <UserSecretsId>shanthi-nikethan-employee-mgmt</UserSecretsId>
   </PropertyGroup>
-
   <ItemGroup>
     <!-- Entra ID authentication -->
     <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.5.1" />
@@ -15,21 +14,21 @@
     <PackageReference Include="Microsoft.Graph" Version="6.5.0" />
     <PackageReference Include="Microsoft.Identity.Web" Version="3.2.0" />
     <PackageReference Include="Microsoft.Identity.Web.UI" Version="3.2.0" />
-
     <!-- Data access -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-
     <!-- Feature management for module toggles -->
     <PackageReference Include="Microsoft.FeatureManagement.AspNetCore" Version="4.0.0" />
-
     <!-- File output generators (kept for Payroll module in later chunk) -->
     <PackageReference Include="ClosedXML" Version="0.104.1" />
     <PackageReference Include="QuestPDF" Version="2024.10.2" />
-
-    <!-- Image handling for staff photos -->
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
+    <!-- SixLabors.ImageSharp removed (2026-08) - confirmed unused anywhere
+         in the codebase. Had two active vulnerability advisories
+         (GHSA-2cmq-823j-5qj8, GHSA-rxmq-m78w-7wmc) and no functional
+         reason to keep upgrading a dependency nothing actually calls.
+         If staff photo resizing/compression is genuinely needed later,
+         re-add this deliberately then, pinned to a current, patched version. -->
   </ItemGroup>
 </Project>
